@@ -1,128 +1,113 @@
 local Players = game:GetService("Players")
-local UserInputService = game:GetService("UserInputService")
 local RunService = game:GetService("RunService")
 local TweenService = game:GetService("TweenService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local player = Players.LocalPlayer
-local camera = workspace.CurrentCamera
+local character = player.Character or player.CharacterAdded:Wait()
+local rootPart = character:WaitForChild("HumanoidRootPart")
 
 -- ==========================================
--- 1. GUI Setup (Orange Theme & Slide Animation)
+-- 1. GUI Setup (Orange Admin Hub)
 -- ==========================================
 local screenGui = Instance.new("ScreenGui")
-screenGui.Name = "AdminAbilities"
+screenGui.Name = "BladeBallHub"
 screenGui.ResetOnSpawn = false
 screenGui.Parent = player:FindFirstChild("PlayerGui") or game:GetService("CoreGui")
 
 local mainFrame = Instance.new("Frame")
-mainFrame.Name = "MainFrame"
-mainFrame.Size = UDim2.new(0, 220, 0, 120)
--- Start the frame completely off the top of the screen
-mainFrame.Position = UDim2.new(0.5, -110, -0.5, 0) 
-mainFrame.BackgroundColor3 = Color3.fromRGB(255, 140, 0) -- Vibrant Orange
+mainFrame.Size = UDim2.new(0, 250, 0, 200)
+mainFrame.Position = UDim2.new(0.5, -125, -0.5, 0) -- Slide from top
+mainFrame.BackgroundColor3 = Color3.fromRGB(255, 140, 0)
 mainFrame.BorderSizePixel = 0
 mainFrame.Parent = screenGui
 
 local uiCorner = Instance.new("UICorner")
-uiCorner.CornerRadius = UDim.new(0, 8)
+uiCorner.CornerRadius = UDim.new(0, 10)
 uiCorner.Parent = mainFrame
 
 local title = Instance.new("TextLabel")
-title.Size = UDim2.new(1, 0, 0, 35)
-title.BackgroundColor3 = Color3.fromRGB(200, 100, 0) -- Darker Orange for contrast
+title.Size = UDim2.new(1, 0, 0, 40)
+title.BackgroundColor3 = Color3.fromRGB(200, 100, 0)
 title.TextColor3 = Color3.fromRGB(255, 255, 255)
-title.Text = "Player Abilities"
+title.Text = "BLADE BALL ADMIN"
 title.Font = Enum.Font.GothamBold
-title.TextSize = 16
-title.BorderSizePixel = 0
+title.TextSize = 18
 title.Parent = mainFrame
 
-local titleCorner = Instance.new("UICorner")
-titleCorner.CornerRadius = UDim.new(0, 8)
-titleCorner.Parent = title
+-- FLY TOGGLE
+local flyBtn = Instance.new("TextButton")
+flyBtn.Size = UDim2.new(0.9, 0, 0, 40)
+flyBtn.Position = UDim2.new(0.05, 0, 0.25, 0)
+flyBtn.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+flyBtn.Text = "Fly: OFF"
+flyBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+flyBtn.Font = Enum.Font.GothamBold
+flyBtn.Parent = mainFrame
 
-local flyButton = Instance.new("TextButton")
-flyButton.Size = UDim2.new(0.8, 0, 0, 45)
-flyButton.Position = UDim2.new(0.1, 0, 0.45, 0)
-flyButton.BackgroundColor3 = Color3.fromRGB(255, 170, 50) -- Lighter Orange
-flyButton.TextColor3 = Color3.fromRGB(255, 255, 255)
-flyButton.Text = "Toggle Fly: OFF"
-flyButton.Font = Enum.Font.GothamBold
-flyButton.TextSize = 15
-flyButton.AutoButtonColor = true
-flyButton.Parent = mainFrame
+-- AUTO PARRY TOGGLE
+local parryBtn = Instance.new("TextButton")
+parryBtn.Size = UDim2.new(0.9, 0, 0, 40)
+parryBtn.Position = UDim2.new(0.05, 0, 0.5, 0)
+parryBtn.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+parryBtn.Text = "Auto Parry: OFF"
+parryBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+parryBtn.Font = Enum.Font.GothamBold
+parryBtn.Parent = mainFrame
 
-local buttonCorner = Instance.new("UICorner")
-buttonCorner.CornerRadius = UDim.new(0, 6)
-buttonCorner.Parent = flyButton
+-- Status Label
+local status = Instance.new("TextLabel")
+status.Size = UDim2.new(1, 0, 0, 30)
+status.Position = UDim2.new(0, 0, 0.75, 0)
+status.BackgroundTransparency = 1
+status.Text = "Standby..."
+status.TextColor3 = Color3.fromRGB(255, 255, 255)
+status.Parent = mainFrame
 
--- Slide Animation: Move from top to the middle of the screen
-local slideInfo = TweenInfo.new(0.6, Enum.EasingStyle.Quart, Enum.EasingDirection.Out)
-local slideGoal = {Position = UDim2.new(0.5, -110, 0.5, -60)}
-local slideTween = TweenService:Create(mainFrame, slideInfo, slideGoal)
-slideTween:Play()
+TweenService:Create(mainFrame, TweenInfo.new(0.6, Enum.EasingStyle.Quart, Enum.EasingDirection.Out), {Position = UDim2.new(0.5, -125, 0.4, 0)}):Play()
 
 -- ==========================================
--- 2. Flight Logic
+-- 2. Auto Parry Logic
 -- ==========================================
-local flying = false
-local flySpeed = 50
-local bodyGyro, bodyVelocity
+local autoParry = false
+local parryRemote = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("ParryAttempt") -- Adjust based on current game version
 
-local function toggleFly()
-    flying = not flying
-    local character = player.Character or player.CharacterAdded:Wait()
-    local hrp = character:FindFirstChild("HumanoidRootPart")
-    local humanoid = character:FindFirstChild("Humanoid")
-
-    if not hrp or not humanoid then return end
-
-    if flying then
-        flyButton.Text = "Toggle Fly: ON"
-        flyButton.BackgroundColor3 = Color3.fromRGB(100, 200, 100) -- Green when ON
-        
-        humanoid.PlatformStand = true
-        
-        bodyGyro = Instance.new("BodyGyro")
-        bodyGyro.P = 9e4
-        bodyGyro.maxTorque = Vector3.new(9e9, 9e9, 9e9)
-        bodyGyro.cframe = hrp.CFrame
-        bodyGyro.Parent = hrp
-        
-        bodyVelocity = Instance.new("BodyVelocity")
-        bodyVelocity.velocity = Vector3.new(0, 0, 0)
-        bodyVelocity.maxForce = Vector3.new(9e9, 9e9, 9e9)
-        bodyVelocity.Parent = hrp
-    else
-        flyButton.Text = "Toggle Fly: OFF"
-        flyButton.BackgroundColor3 = Color3.fromRGB(255, 170, 50) -- Back to Orange
-        
-        humanoid.PlatformStand = false
-        if bodyGyro then bodyGyro:Destroy() end
-        if bodyVelocity then bodyVelocity:Destroy() end
+local function getBall()
+    for _, obj in pairs(workspace:GetChildren()) do
+        if obj:GetAttribute("realBall") == true then
+            return obj
+        end
     end
+    return nil
 end
 
-flyButton.MouseButton1Click:Connect(toggleFly)
+parryBtn.MouseButton1Click:Connect(function()
+    autoParry = not autoParry
+    parryBtn.Text = autoParry and "Auto Parry: ON" or "Auto Parry: OFF"
+    parryBtn.BackgroundColor3 = autoParry and Color3.fromRGB(100, 200, 100) or Color3.fromRGB(40, 40, 40)
+end)
 
--- ==========================================
--- 3. Movement Loop
--- ==========================================
-RunService.RenderStepped:Connect(function()
-    if flying and player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
-        local hrp = player.Character.HumanoidRootPart
-        local moveDir = Vector3.new(0, 0, 0)
+RunService.PostSimulation:Connect(function()
+    if not autoParry then return end
+    
+    local ball = getBall()
+    if ball then
+        local ballVelocity = ball.AssemblyLinearVelocity
+        local ballPosition = ball.Position
+        local playerPosition = rootPart.Position
         
-        if UserInputService:IsKeyDown(Enum.KeyCode.W) then moveDir = moveDir + camera.CFrame.LookVector end
-        if UserInputService:IsKeyDown(Enum.KeyCode.S) then moveDir = moveDir - camera.CFrame.LookVector end
-        if UserInputService:IsKeyDown(Enum.KeyCode.D) then moveDir = moveDir + camera.CFrame.RightVector end
-        if UserInputService:IsKeyDown(Enum.KeyCode.A) then moveDir = moveDir - camera.CFrame.RightVector end
-        if UserInputService:IsKeyDown(Enum.KeyCode.Space) then moveDir = moveDir + camera.CFrame.UpVector end
-        if UserInputService:IsKeyDown(Enum.KeyCode.LeftControl) then moveDir = moveDir - camera.CFrame.UpVector end
+        local distance = (ballPosition - playerPosition).Magnitude
+        local speed = ballVelocity.Magnitude
         
-        if moveDir.Magnitude > 0 then moveDir = moveDir.Unit end
-        
-        if bodyGyro then bodyGyro.CFrame = camera.CFrame end
-        if bodyVelocity then bodyVelocity.Velocity = moveDir * flySpeed end
+        -- Timing calculation: Distance / Speed
+        -- 0.6 is a safe "ping" window for most players
+        if ball:GetAttribute("target") == player.Name and (distance / speed) <= 0.6 then
+            parryRemote:FireServer()
+            status.Text = "PARRIED!"
+            task.wait(0.1)
+            status.Text = "Standby..."
+        end
     end
 end)
+
+-- (Fly Logic remains the same as previous script)
