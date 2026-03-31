@@ -8,16 +8,16 @@ local character = player.Character or player.CharacterAdded:Wait()
 local rootPart = character:WaitForChild("HumanoidRootPart")
 
 -- ==========================================
--- 1. GUI Setup (Orange Admin Hub)
+-- 1. GUI Setup (Clean Orange Theme)
 -- ==========================================
 local screenGui = Instance.new("ScreenGui")
-screenGui.Name = "BladeBallHub"
+screenGui.Name = "BladeBallPro"
 screenGui.ResetOnSpawn = false
 screenGui.Parent = player:FindFirstChild("PlayerGui") or game:GetService("CoreGui")
 
 local mainFrame = Instance.new("Frame")
-mainFrame.Size = UDim2.new(0, 250, 0, 200)
-mainFrame.Position = UDim2.new(0.5, -125, -0.5, 0) -- Slide from top
+mainFrame.Size = UDim2.new(0, 200, 0, 130)
+mainFrame.Position = UDim2.new(0.5, -100, -0.5, 0) -- Starts off-screen
 mainFrame.BackgroundColor3 = Color3.fromRGB(255, 140, 0)
 mainFrame.BorderSizePixel = 0
 mainFrame.Parent = screenGui
@@ -27,50 +27,36 @@ uiCorner.CornerRadius = UDim.new(0, 10)
 uiCorner.Parent = mainFrame
 
 local title = Instance.new("TextLabel")
-title.Size = UDim2.new(1, 0, 0, 40)
+title.Size = UDim2.new(1, 0, 0, 35)
 title.BackgroundColor3 = Color3.fromRGB(200, 100, 0)
 title.TextColor3 = Color3.fromRGB(255, 255, 255)
-title.Text = "BLADE BALL ADMIN"
+title.Text = "AUTO PARRY V1"
 title.Font = Enum.Font.GothamBold
-title.TextSize = 18
+title.TextSize = 16
 title.Parent = mainFrame
 
--- FLY TOGGLE
-local flyBtn = Instance.new("TextButton")
-flyBtn.Size = UDim2.new(0.9, 0, 0, 40)
-flyBtn.Position = UDim2.new(0.05, 0, 0.25, 0)
-flyBtn.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
-flyBtn.Text = "Fly: OFF"
-flyBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-flyBtn.Font = Enum.Font.GothamBold
-flyBtn.Parent = mainFrame
-
--- AUTO PARRY TOGGLE
 local parryBtn = Instance.new("TextButton")
-parryBtn.Size = UDim2.new(0.9, 0, 0, 40)
-parryBtn.Position = UDim2.new(0.05, 0, 0.5, 0)
+parryBtn.Size = UDim2.new(0.8, 0, 0, 45)
+parryBtn.Position = UDim2.new(0.1, 0, 0.45, 0)
 parryBtn.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
-parryBtn.Text = "Auto Parry: OFF"
+parryBtn.Text = "Parry: DISABLED"
 parryBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
 parryBtn.Font = Enum.Font.GothamBold
 parryBtn.Parent = mainFrame
 
--- Status Label
-local status = Instance.new("TextLabel")
-status.Size = UDim2.new(1, 0, 0, 30)
-status.Position = UDim2.new(0, 0, 0.75, 0)
-status.BackgroundTransparency = 1
-status.Text = "Standby..."
-status.TextColor3 = Color3.fromRGB(255, 255, 255)
-status.Parent = mainFrame
+local btnCorner = Instance.new("UICorner")
+btnCorner.CornerRadius = UDim.new(0, 6)
+btnCorner.Parent = parryBtn
 
-TweenService:Create(mainFrame, TweenInfo.new(0.6, Enum.EasingStyle.Quart, Enum.EasingDirection.Out), {Position = UDim2.new(0.5, -125, 0.4, 0)}):Play()
+-- Animation: Slide to center
+TweenService:Create(mainFrame, TweenInfo.new(0.5, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {Position = UDim2.new(0.5, -100, 0.4, 0)}):Play()
 
 -- ==========================================
--- 2. Auto Parry Logic
+-- 2. Core Detection Logic
 -- ==========================================
 local autoParry = false
-local parryRemote = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("ParryAttempt") -- Adjust based on current game version
+local remotes = ReplicatedStorage:WaitForChild("Remotes")
+local parryRemote = remotes:FindFirstChild("ParryAttempt") or remotes:FindFirstChild("Block")
 
 local function getBall()
     for _, obj in pairs(workspace:GetChildren()) do
@@ -83,31 +69,23 @@ end
 
 parryBtn.MouseButton1Click:Connect(function()
     autoParry = not autoParry
-    parryBtn.Text = autoParry and "Auto Parry: ON" or "Auto Parry: OFF"
-    parryBtn.BackgroundColor3 = autoParry and Color3.fromRGB(100, 200, 100) or Color3.fromRGB(40, 40, 40)
+    parryBtn.Text = autoParry and "Parry: ENABLED" or "Parry: DISABLED"
+    parryBtn.BackgroundColor3 = autoParry and Color3.fromRGB(60, 180, 60) or Color3.fromRGB(40, 40, 40)
 end)
 
-RunService.PostSimulation:Connect(function()
+RunService.Heartbeat:Connect(function()
     if not autoParry then return end
     
     local ball = getBall()
-    if ball then
-        local ballVelocity = ball.AssemblyLinearVelocity
-        local ballPosition = ball.Position
-        local playerPosition = rootPart.Position
+    if ball and ball:GetAttribute("target") == player.Name then
+        local distance = (ball.Position - rootPart.Position).Magnitude
+        local velocity = ball.AssemblyLinearVelocity.Magnitude
         
-        local distance = (ballPosition - playerPosition).Magnitude
-        local speed = ballVelocity.Magnitude
-        
-        -- Timing calculation: Distance / Speed
-        -- 0.6 is a safe "ping" window for most players
-        if ball:GetAttribute("target") == player.Name and (distance / speed) <= 0.6 then
-            parryRemote:FireServer()
-            status.Text = "PARRIED!"
-            task.wait(0.1)
-            status.Text = "Standby..."
+        -- The Magic Math: If it hits in less than 0.6 seconds, block!
+        if (distance / velocity) <= 0.6 then
+            if parryRemote then
+                parryRemote:FireServer()
+            end
         end
     end
 end)
-
--- (Fly Logic remains the same as previous script)
