@@ -440,7 +440,7 @@ MinBtn.MouseButton1Click:Connect(function() setOpen(not isOpen) end)
 -- ============================
 local SmallSpamFrame = Instance.new("Frame", ScreenGui)
 SmallSpamFrame.Size = UDim2.new(0,100,0,48)  -- taller to fit handle + button
-SmallSpamFrame.Position = UDim2.new(1,-110,1,-58)
+SmallSpamFrame.Position = UDim2.new(0.5, -105, 0.5, -142)
 SmallSpamFrame.BackgroundColor3 = BLACK
 SmallSpamFrame.BackgroundTransparency = 0.05
 SmallSpamFrame.BorderSizePixel = 0
