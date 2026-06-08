@@ -32,9 +32,6 @@ local frameTime = 0
 local spamKey = Enum.KeyCode.E
 local waitingForKey = false
 
--- Mobile detection
-local isMobile = UserInputService.TouchEnabled and not UserInputService.MouseEnabled
-
 local ORANGE = Color3.fromRGB(255, 140, 0)
 local ORANGE_DARK = Color3.fromRGB(180, 80, 0)
 local ORANGE_BG = Color3.fromRGB(30, 10, 0)
@@ -67,7 +64,6 @@ local function setAntiLag(state)
 end
 
 local function getModifiedArgs()
-    -- same as your original
     local Alive = workspace:FindFirstChild("Alive")
     local camera = workspace.CurrentCamera
     local event_data = {}
@@ -175,12 +171,12 @@ CounterFrame.InputChanged:Connect(function(inp)
 end)
 
 -- MAIN FRAME - HEIGHT INCREASED TO 305
-local fullSize = UDim2.new(0,210,0,305)  -- was 285
+local fullSize = UDim2.new(0,210,0,305)
 local miniSize = UDim2.new(0,210,0,32)
 
 local Frame = Instance.new("Frame", ScreenGui)
 Frame.Size = fullSize
-Frame.Position = UDim2.new(0.5,-105,0.5,-152)  -- adjusted vertical centering
+Frame.Position = UDim2.new(0.5,-105,0.5,-152)
 Frame.BackgroundColor3 = BLACK
 Frame.BackgroundTransparency = 0.05
 Frame.BorderSizePixel = 0
@@ -372,7 +368,7 @@ ModeSwitch.MouseButton1Click:Connect(function()
     ModeSwitch.BackgroundColor3 = isHoldMode and Color3.fromRGB(0,100,200) or Color3.fromRGB(50,50,50)
     if isHoldMode then
         spamActive = false
-        updateSpamUI()  -- update both buttons
+        updateSpamUI()
     end
 end)
 
@@ -409,21 +405,18 @@ HintLabel.Font = Enum.Font.Gotham; HintLabel.TextSize = 9
 HintLabel.TextColor3 = Color3.fromRGB(100,70,30)
 
 -- ======================
--- ADDED MOBILE BUTTON
+-- SMALL SPAM BUTTON (NOW VISIBLE ON ALL DEVICES)
 -- ======================
-local MobileToggleBtn = nil
-if isMobile then
-    MobileToggleBtn = Instance.new("TextButton", Content)
-    MobileToggleBtn.Size = UDim2.new(0,80,0,24)  -- smaller
-    MobileToggleBtn.Position = UDim2.new(0.5,-40,0,272)  -- centered below hint
-    MobileToggleBtn.BackgroundColor3 = ORANGE_DARK
-    MobileToggleBtn.Text = "SPAM: OFF"
-    MobileToggleBtn.Font = Enum.Font.GothamBold
-    MobileToggleBtn.TextSize = 11
-    MobileToggleBtn.TextColor3 = WHITE
-    MobileToggleBtn.BorderSizePixel = 0
-    Instance.new("UICorner", MobileToggleBtn).CornerRadius = UDim.new(0,8)
-end
+local MobileToggleBtn = Instance.new("TextButton", Content)
+MobileToggleBtn.Size = UDim2.new(0,80,0,24)
+MobileToggleBtn.Position = UDim2.new(0.5,-40,0,272)  -- centered below hint
+MobileToggleBtn.BackgroundColor3 = ORANGE_DARK
+MobileToggleBtn.Text = "SPAM: OFF"
+MobileToggleBtn.Font = Enum.Font.GothamBold
+MobileToggleBtn.TextSize = 11
+MobileToggleBtn.TextColor3 = WHITE
+MobileToggleBtn.BorderSizePixel = 0
+Instance.new("UICorner", MobileToggleBtn).CornerRadius = UDim.new(0,8)
 
 -- Function to update both spam buttons' appearance
 local function updateSpamUI()
@@ -457,9 +450,7 @@ local function toggleSpam()
 end
 
 ToggleBtn.MouseButton1Click:Connect(toggleSpam)
-if MobileToggleBtn then
-    MobileToggleBtn.MouseButton1Click:Connect(toggleSpam)
-end
+MobileToggleBtn.MouseButton1Click:Connect(toggleSpam)
 
 -- (rest of your original code: setOpen, dragging, input handlers, etc.)
 local function setOpen(state)
@@ -524,7 +515,7 @@ task.spawn(function()
     StatusLabel.TextColor3 = ORANGE
 end)
 
--- HEARTBEAT (unchanged except updating both buttons in hold mode)
+-- HEARTBEAT (unchanged)
 RunService.Heartbeat:Connect(function(dt)
     fpsCount+=1; fpsTimer+=dt; frameTime+=dt
 
