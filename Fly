@@ -125,7 +125,9 @@ local ScreenGui = Instance.new("ScreenGui", game.CoreGui)
 ScreenGui.Name = "SpamHubGui"
 ScreenGui.ResetOnSpawn = false
 
--- COUNTER UI (unchanged)
+-- ============================
+-- 1. COUNTER UI (top-right, draggable)
+-- ============================
 local CounterFrame = Instance.new("Frame", ScreenGui)
 CounterFrame.Size = UDim2.new(0,130,0,68)
 CounterFrame.Position = UDim2.new(1,-140,0,10)
@@ -154,6 +156,7 @@ PingCounterLbl.BackgroundTransparency = 1; PingCounterLbl.Text = "Ping: --ms"
 PingCounterLbl.Font = Enum.Font.GothamBold; PingCounterLbl.TextSize = 12
 PingCounterLbl.TextColor3 = WHITE; PingCounterLbl.TextXAlignment = Enum.TextXAlignment.Left
 
+-- Dragging for CounterFrame
 local cDrag, cStart, cPos
 CounterFrame.InputBegan:Connect(function(inp)
     if inp.UserInputType == Enum.UserInputType.MouseButton1 or inp.UserInputType == Enum.UserInputType.Touch then
@@ -170,20 +173,22 @@ CounterFrame.InputChanged:Connect(function(inp)
     end
 end)
 
--- MAIN FRAME - HEIGHT INCREASED TO 305
-local fullSize = UDim2.new(0,210,0,305)
+-- ============================
+-- 2. MAIN MACRO WINDOW (center, draggable, minimizable)
+-- ============================
+local fullSize = UDim2.new(0,210,0,285)  -- back to original height since we removed inside button
 local miniSize = UDim2.new(0,210,0,32)
 
 local Frame = Instance.new("Frame", ScreenGui)
 Frame.Size = fullSize
-Frame.Position = UDim2.new(0.5,-105,0.5,-152)
+Frame.Position = UDim2.new(0.5,-105,0.5,-142)
 Frame.BackgroundColor3 = BLACK
 Frame.BackgroundTransparency = 0.05
 Frame.BorderSizePixel = 0
 Frame.ClipsDescendants = true
 Instance.new("UICorner", Frame).CornerRadius = UDim.new(0,14)
 
--- ANIMATED STROKE (unchanged)
+-- Animated stroke
 local Stroke = Instance.new("UIStroke", Frame)
 Stroke.Color = WHITE; Stroke.Thickness = 2
 local StrokeGradient = Instance.new("UIGradient", Stroke)
@@ -270,7 +275,7 @@ local function makeToggleBtn(y, txt, active)
     return b
 end
 
--- CPS SLIDER (unchanged)
+-- CPS Slider
 local CpsLabel = Instance.new("TextLabel", Content)
 CpsLabel.Size = UDim2.new(1,0,0,18); CpsLabel.Position = UDim2.new(0,0,0,22)
 CpsLabel.BackgroundTransparency = 1; CpsLabel.Text = "CPS: 150"
@@ -320,7 +325,7 @@ SliderBg.InputBegan:Connect(function(i)
     end
 end)
 
--- SPAM BUTTON (original)
+-- Big Spam Button (inside main window)
 local ToggleBtn = Instance.new("TextButton", Content)
 ToggleBtn.Size = UDim2.new(0.85,0,0,32); ToggleBtn.Position = UDim2.new(0.075,0,0,60)
 ToggleBtn.BackgroundColor3 = ORANGE_DARK; ToggleBtn.Text = "SPAM: OFF"
@@ -328,7 +333,7 @@ ToggleBtn.Font = Enum.Font.GothamBold; ToggleBtn.TextSize = 13
 ToggleBtn.TextColor3 = WHITE; ToggleBtn.BorderSizePixel = 0
 Instance.new("UICorner", ToggleBtn).CornerRadius = UDim.new(0,8)
 
--- SPAM KEY
+-- Spam Key
 makeRow(100, "Spam Key")
 local SpamKeyBtn = Instance.new("TextButton", Content)
 SpamKeyBtn.Size = UDim2.new(0,46,0,22); SpamKeyBtn.Position = UDim2.new(1,-56,0,100)
@@ -354,7 +359,7 @@ end)
 
 makDiv(130)
 
--- MODE SWITCH
+-- Mode Switch
 makeRow(138, "Mode")
 local ModeSwitch = Instance.new("TextButton", Content)
 ModeSwitch.Size = UDim2.new(0,70,0,22); ModeSwitch.Position = UDim2.new(1,-80,0,138)
@@ -374,7 +379,7 @@ end)
 
 makDiv(168)
 
--- ANIM FIX
+-- Anim Fix
 makeRow(176, "Anim Fix")
 local AnimBtn = makeToggleBtn(176, "ON", true)
 AnimBtn.BackgroundColor3 = ORANGE
@@ -386,7 +391,7 @@ end)
 
 makDiv(206)
 
--- ANTI LAG
+-- Anti Lag
 makeRow(214, "Anti Lag")
 local AntiBtn = makeToggleBtn(214, "OFF", false)
 AntiBtn.MouseButton1Click:Connect(function()
@@ -404,33 +409,119 @@ HintLabel.BackgroundTransparency = 1; HintLabel.Text = "_  Hide UI"
 HintLabel.Font = Enum.Font.Gotham; HintLabel.TextSize = 9
 HintLabel.TextColor3 = Color3.fromRGB(100,70,30)
 
--- ======================
--- SMALL SPAM BUTTON (NOW VISIBLE ON ALL DEVICES)
--- ======================
-local MobileToggleBtn = Instance.new("TextButton", Content)
-MobileToggleBtn.Size = UDim2.new(0,80,0,24)
-MobileToggleBtn.Position = UDim2.new(0.5,-40,0,272)  -- centered below hint
-MobileToggleBtn.BackgroundColor3 = ORANGE_DARK
-MobileToggleBtn.Text = "SPAM: OFF"
-MobileToggleBtn.Font = Enum.Font.GothamBold
-MobileToggleBtn.TextSize = 11
-MobileToggleBtn.TextColor3 = WHITE
-MobileToggleBtn.BorderSizePixel = 0
-Instance.new("UICorner", MobileToggleBtn).CornerRadius = UDim.new(0,8)
+-- Dragging for main frame
+local dragging, dragStart, startPos
+TitleBar.InputBegan:Connect(function(input)
+    if input.UserInputType==Enum.UserInputType.MouseButton1 or input.UserInputType==Enum.UserInputType.Touch then
+        dragging=true; dragStart=input.Position; startPos=Frame.Position
+        input.Changed:Connect(function()
+            if input.UserInputState==Enum.UserInputState.End then dragging=false end
+        end)
+    end
+end)
+TitleBar.InputChanged:Connect(function(input)
+    if dragging and (input.UserInputType==Enum.UserInputType.MouseMovement or input.UserInputType==Enum.UserInputType.Touch) then
+        local delta=input.Position-dragStart
+        Frame.Position=UDim2.new(startPos.X.Scale,startPos.X.Offset+delta.X,startPos.Y.Scale,startPos.Y.Offset+delta.Y)
+    end
+end)
 
--- Function to update both spam buttons' appearance
+local function setOpen(state)
+    isOpen = state
+    TweenService:Create(Frame, TweenInfo.new(0.25,Enum.EasingStyle.Quad,Enum.EasingDirection.Out),{
+        Size = state and fullSize or miniSize
+    }):Play()
+    MinBtn.Text = state and "_" or "▲"
+end
+MinBtn.MouseButton1Click:Connect(function() setOpen(not isOpen) end)
+
+-- ============================
+-- 3. EXTERNAL SMALL SPAM BUTTON (with drag handle)
+-- ============================
+local SmallSpamFrame = Instance.new("Frame", ScreenGui)
+SmallSpamFrame.Size = UDim2.new(0,100,0,48)  -- taller to fit handle + button
+SmallSpamFrame.Position = UDim2.new(1,-110,1,-58)
+SmallSpamFrame.BackgroundColor3 = BLACK
+SmallSpamFrame.BackgroundTransparency = 0.05
+SmallSpamFrame.BorderSizePixel = 0
+Instance.new("UICorner", SmallSpamFrame).CornerRadius = UDim.new(0,8)
+local SmallStroke = Instance.new("UIStroke", SmallSpamFrame)
+SmallStroke.Color = ORANGE; SmallStroke.Thickness = 1
+
+-- Drag handle (top bar)
+local DragHandle = Instance.new("Frame", SmallSpamFrame)
+DragHandle.Size = UDim2.new(1,0,0,12)
+DragHandle.Position = UDim2.new(0,0,0,0)
+DragHandle.BackgroundColor3 = ORANGE_DARK
+DragHandle.BackgroundTransparency = 0.3
+DragHandle.BorderSizePixel = 0
+Instance.new("UICorner", DragHandle).CornerRadius = UDim.new(0,8)  -- top corners only? but fine
+
+-- Grip dots (optional visual)
+local GripLabel = Instance.new("TextLabel", DragHandle)
+GripLabel.Size = UDim2.new(1,0,1,0)
+GripLabel.BackgroundTransparency = 1
+GripLabel.Text = "⋯"
+GripLabel.TextColor3 = WHITE
+GripLabel.TextSize = 10
+GripLabel.Font = Enum.Font.GothamBold
+GripLabel.TextYAlignment = Enum.TextYAlignment.Top
+
+-- The spam button (below handle)
+local SmallSpamBtn = Instance.new("TextButton", SmallSpamFrame)
+SmallSpamBtn.Size = UDim2.new(1,-4,0,28)
+SmallSpamBtn.Position = UDim2.new(0,2,0,14)
+SmallSpamBtn.BackgroundColor3 = ORANGE_DARK
+SmallSpamBtn.Text = "SPAM: OFF"
+SmallSpamBtn.Font = Enum.Font.GothamBold
+SmallSpamBtn.TextSize = 11
+SmallSpamBtn.TextColor3 = WHITE
+SmallSpamBtn.BorderSizePixel = 0
+Instance.new("UICorner", SmallSpamBtn).CornerRadius = UDim.new(0,6)
+
+-- Dragging: only when dragging the handle (not the button)
+local ssDrag, ssStart, ssPos
+DragHandle.InputBegan:Connect(function(inp)
+    if inp.UserInputType == Enum.UserInputType.MouseButton1 or inp.UserInputType == Enum.UserInputType.Touch then
+        ssDrag = true; ssStart = inp.Position; ssPos = SmallSpamFrame.Position
+        inp.Changed:Connect(function()
+            if inp.UserInputState == Enum.UserInputState.End then ssDrag = false end
+        end)
+    end
+end)
+UserInputService.InputChanged:Connect(function(inp)
+    if ssDrag and (inp.UserInputType == Enum.UserInputType.MouseMovement or inp.UserInputType == Enum.UserInputType.Touch) then
+        local delta = inp.Position - ssStart
+        SmallSpamFrame.Position = UDim2.new(ssPos.X.Scale, ssPos.X.Offset + delta.X, ssPos.Y.Scale, ssPos.Y.Offset + delta.Y)
+    end
+end)
+
+-- Also allow dragging by the frame's background (excluding button and handle)
+SmallSpamFrame.InputBegan:Connect(function(inp)
+    if (inp.UserInputType == Enum.UserInputType.MouseButton1 or inp.UserInputType == Enum.UserInputType.Touch) then
+        -- only if the click target is the frame itself (not the button or handle)
+        local target = inp.Target
+        if target == SmallSpamFrame or target == SmallSpamFrame then
+            ssDrag = true; ssStart = inp.Position; ssPos = SmallSpamFrame.Position
+            inp.Changed:Connect(function()
+                if inp.UserInputState == Enum.UserInputState.End then ssDrag = false end
+            end)
+        end
+    end
+end)
+
+-- ============================
+-- Shared spam toggle logic
+-- ============================
 local function updateSpamUI()
     local stateText = spamActive and "ON" or "OFF"
     local bgColor = spamActive and ORANGE or ORANGE_DARK
     ToggleBtn.Text = "SPAM: "..stateText
     ToggleBtn.BackgroundColor3 = bgColor
-    if MobileToggleBtn then
-        MobileToggleBtn.Text = "SPAM: "..stateText
-        MobileToggleBtn.BackgroundColor3 = bgColor
-    end
+    SmallSpamBtn.Text = "SPAM: "..stateText
+    SmallSpamBtn.BackgroundColor3 = bgColor
 end
 
--- Original toggle logic
 local function toggleSpam()
     if isHoldMode then
         if not remote then
@@ -450,62 +541,34 @@ local function toggleSpam()
 end
 
 ToggleBtn.MouseButton1Click:Connect(toggleSpam)
-MobileToggleBtn.MouseButton1Click:Connect(toggleSpam)
+SmallSpamBtn.MouseButton1Click:Connect(toggleSpam)
 
--- (rest of your original code: setOpen, dragging, input handlers, etc.)
-local function setOpen(state)
-    isOpen = state
-    TweenService:Create(Frame, TweenInfo.new(0.25,Enum.EasingStyle.Quad,Enum.EasingDirection.Out),{
-        Size = state and fullSize or miniSize
-    }):Play()
-    MinBtn.Text = state and "_" or "▲"
-end
-MinBtn.MouseButton1Click:Connect(function() setOpen(not isOpen) end)
-
-local dragging, dragStart, startPos
-TitleBar.InputBegan:Connect(function(input)
-    if input.UserInputType==Enum.UserInputType.MouseButton1 or input.UserInputType==Enum.UserInputType.Touch then
-        dragging=true; dragStart=input.Position; startPos=Frame.Position
-        input.Changed:Connect(function()
-            if input.UserInputState==Enum.UserInputState.End then dragging=false end
-        end)
-    end
-end)
-TitleBar.InputChanged:Connect(function(input)
-    if dragging and (input.UserInputType==Enum.UserInputType.MouseMovement or input.UserInputType==Enum.UserInputType.Touch) then
-        local delta=input.Position-dragStart
-        Frame.Position=UDim2.new(startPos.X.Scale,startPos.X.Offset+delta.X,startPos.Y.Scale,startPos.Y.Offset+delta.Y)
-    end
-end)
-
+-- Keyboard input for spam key
 UserInputService.InputBegan:Connect(function(input, gp)
     if gp or waitingForKey then return end
-    if input.KeyCode==Enum.KeyCode.LeftAlt or input.KeyCode==Enum.KeyCode.RightAlt then
+    if input.KeyCode == Enum.KeyCode.LeftAlt or input.KeyCode == Enum.KeyCode.RightAlt then
         setOpen(not isOpen)
-    elseif input.KeyCode==spamKey then
+    elseif input.KeyCode == spamKey then
         if isHoldMode then
             if not remote then return end
-            holdActive=true; spamAccum=0
-            ToggleBtn.Text="SPAM: ON"
-            ToggleBtn.BackgroundColor3=ORANGE
-            if MobileToggleBtn then
-                MobileToggleBtn.Text="SPAM: ON"
-                MobileToggleBtn.BackgroundColor3=ORANGE
-            end
+            holdActive = true
+            spamAccum = 0
+            ToggleBtn.Text = "SPAM: ON"
+            ToggleBtn.BackgroundColor3 = ORANGE
+            SmallSpamBtn.Text = "SPAM: ON"
+            SmallSpamBtn.BackgroundColor3 = ORANGE
         else
             toggleSpam()
         end
     end
 end)
 UserInputService.InputEnded:Connect(function(input)
-    if input.KeyCode==spamKey and isHoldMode then
-        holdActive=false
-        ToggleBtn.Text="SPAM: OFF"
-        ToggleBtn.BackgroundColor3=ORANGE_DARK
-        if MobileToggleBtn then
-            MobileToggleBtn.Text="SPAM: OFF"
-            MobileToggleBtn.BackgroundColor3=ORANGE_DARK
-        end
+    if input.KeyCode == spamKey and isHoldMode then
+        holdActive = false
+        ToggleBtn.Text = "SPAM: OFF"
+        ToggleBtn.BackgroundColor3 = ORANGE_DARK
+        SmallSpamBtn.Text = "SPAM: OFF"
+        SmallSpamBtn.BackgroundColor3 = ORANGE_DARK
     end
 end)
 
@@ -515,47 +578,51 @@ task.spawn(function()
     StatusLabel.TextColor3 = ORANGE
 end)
 
--- HEARTBEAT (unchanged)
+-- Heartbeat (spam loop)
 RunService.Heartbeat:Connect(function(dt)
-    fpsCount+=1; fpsTimer+=dt; frameTime+=dt
+    fpsCount = fpsCount + 1
+    fpsTimer = fpsTimer + dt
+    frameTime = frameTime + dt
 
-    if fpsTimer>=1 then
-        local fps=math.floor(fpsCount/fpsTimer)
-        fpsCount=0; fpsTimer=0
-        FpsCounterLbl.Text="FPS: "..fps
+    if fpsTimer >= 1 then
+        local fps = math.floor(fpsCount / fpsTimer)
+        fpsCount = 0
+        fpsTimer = 0
+        FpsCounterLbl.Text = "FPS: " .. fps
         pcall(function()
-            local ping=math.floor(StatsService.Network.ServerStatsItem["Data Ping"]:GetValue())
-            PingCounterLbl.Text="Ping: "..ping.."ms"
+            local ping = math.floor(StatsService.Network.ServerStatsItem["Data Ping"]:GetValue())
+            PingCounterLbl.Text = "Ping: " .. ping .. "ms"
         end)
     end
 
-    if frameTime>=0.1 then
-        local real=math.floor(frameFireCount/frameTime)
-        CpsCounterLbl.Text="CPS: "..real
-        frameFireCount=0; frameTime=0
+    if frameTime >= 0.1 then
+        local real = math.floor(frameFireCount / frameTime)
+        CpsCounterLbl.Text = "CPS: " .. real
+        frameFireCount = 0
+        frameTime = 0
     end
 
-    local doSpam=(isHoldMode and holdActive) or (not isHoldMode and spamActive)
+    local doSpam = (isHoldMode and holdActive) or (not isHoldMode and spamActive)
 
     if doSpam and remote and f_raw then
-        spamAccum=spamAccum+dt*targetCPS
-        local fires=math.floor(spamAccum)
-        if fires>0 then
-            spamAccum=spamAccum-fires
-            local modified_args=getModifiedArgs()
-            for _=1,fires do
+        spamAccum = spamAccum + dt * targetCPS
+        local fires = math.floor(spamAccum)
+        if fires > 0 then
+            spamAccum = spamAccum - fires
+            local modified_args = getModifiedArgs()
+            for _ = 1, fires do
                 pcall(function()
                     if remote:IsA('RemoteEvent') then
-                        f_raw(remote,unpack(modified_args))
+                        f_raw(remote, unpack(modified_args))
                     elseif remote:IsA('RemoteFunction') then
                         remote:InvokeServer(unpack(modified_args))
                     end
-                    frameFireCount+=1
+                    frameFireCount = frameFireCount + 1
                 end)
             end
         end
         if animFix then PressButton() end
     else
-        spamAccum=0
+        spamAccum = 0
     end
 end)
