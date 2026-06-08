@@ -1,91 +1,523 @@
+repeat task.wait() until game:IsLoaded()
+
+local oldGui = game.CoreGui:FindFirstChild("SpamHubGui")
+if oldGui then oldGui:Destroy() end
+
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
-local TweenService = game:GetService("TweenService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local UserInputService = game:GetService("UserInputService")
+local TweenService = game:GetService("TweenService")
+local StatsService = game:GetService("Stats")
+local Debris = game:GetService("Debris")
+local LocalPlayer = Players.LocalPlayer
 
-local player = Players.LocalPlayer
-local character = player.Character or player.CharacterAdded:Wait()
-local rootPart = character:WaitForChild("HumanoidRootPart")
+local remote, f_raw = nil, nil
+local c = {nil,nil,nil,nil,nil,nil,nil}
+local original_args = {}
+local spamActive = false
+local animFix = true
+local antiLag = false
+local targetCPS = 150 -- Adjusted default to match your screenshot
+local spamAccum = 0
+local remoteHooked = false
+local isOpen = true
+local isHoldMode = false
+local holdActive = false
+local fpsCount = 0
+local fpsTimer = 0
+local frameFireCount = 0
+local frameTime = 0
 
--- ==========================================
--- 1. GUI Setup (Clean Orange Theme)
--- ==========================================
-local screenGui = Instance.new("ScreenGui")
-screenGui.Name = "BladeBallPro"
-screenGui.ResetOnSpawn = false
-screenGui.Parent = player:FindFirstChild("PlayerGui") or game:GetService("CoreGui")
+local spamKey = Enum.KeyCode.E -- Changed default to E
+local waitingForKey = false
 
-local mainFrame = Instance.new("Frame")
-mainFrame.Size = UDim2.new(0, 200, 0, 130)
-mainFrame.Position = UDim2.new(0.5, -100, -0.5, 0) -- Starts off-screen
-mainFrame.BackgroundColor3 = Color3.fromRGB(255, 140, 0)
-mainFrame.BorderSizePixel = 0
-mainFrame.Parent = screenGui
+local ORANGE = Color3.fromRGB(255, 140, 0)
+local ORANGE_DARK = Color3.fromRGB(180, 80, 0)
+local ORANGE_BG = Color3.fromRGB(30, 10, 0)
+local BLACK = Color3.fromRGB(12, 12, 12) -- Slightly lighter black for cleaner look
+local WHITE = Color3.new(1,1,1)
 
-local uiCorner = Instance.new("UICorner")
-uiCorner.CornerRadius = UDim.new(0, 10)
-uiCorner.Parent = mainFrame
-
-local title = Instance.new("TextLabel")
-title.Size = UDim2.new(1, 0, 0, 35)
-title.BackgroundColor3 = Color3.fromRGB(200, 100, 0)
-title.TextColor3 = Color3.fromRGB(255, 255, 255)
-title.Text = "AUTO PARRY V1"
-title.Font = Enum.Font.GothamBold
-title.TextSize = 16
-title.Parent = mainFrame
-
-local parryBtn = Instance.new("TextButton")
-parryBtn.Size = UDim2.new(0.8, 0, 0, 45)
-parryBtn.Position = UDim2.new(0.1, 0, 0.45, 0)
-parryBtn.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
-parryBtn.Text = "Parry: DISABLED"
-parryBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-parryBtn.Font = Enum.Font.GothamBold
-parryBtn.Parent = mainFrame
-
-local btnCorner = Instance.new("UICorner")
-btnCorner.CornerRadius = UDim.new(0, 6)
-btnCorner.Parent = parryBtn
-
--- Animation: Slide to center
-TweenService:Create(mainFrame, TweenInfo.new(0.5, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {Position = UDim2.new(0.5, -100, 0.4, 0)}):Play()
-
--- ==========================================
--- 2. Core Detection Logic
--- ==========================================
-local autoParry = false
-local remotes = ReplicatedStorage:WaitForChild("Remotes")
-local parryRemote = remotes:FindFirstChild("ParryAttempt") or remotes:FindFirstChild("Block")
-
-local function getBall()
-    for _, obj in pairs(workspace:GetChildren()) do
-        if obj:GetAttribute("realBall") == true then
-            return obj
+-- ANTI LAG
+local antiLagConn = nil
+local function setAntiLag(state)
+    antiLag = state
+    pcall(function()
+        if LocalPlayer.PlayerScripts:FindFirstChild("EffectScripts") then
+            LocalPlayer.PlayerScripts.EffectScripts.ClientFX.Disabled = state
         end
+    end)
+    if state then
+        pcall(function()
+            antiLagConn = workspace.Runtime.ChildAdded:Connect(function(v)
+                Debris:AddItem(v, 0)
+            end)
+            for _, v in pairs(workspace:GetDescendants()) do
+                if v:IsA("ParticleEmitter") or v:IsA("Trail") or v:IsA("Smoke") or v:IsA("Fire") or v:IsA("Sparkles") then
+                    v.Enabled = false
+                end
+            end
+        end)
+    else
+        if antiLagConn then antiLagConn:Disconnect(); antiLagConn = nil end
     end
-    return nil
 end
 
-parryBtn.MouseButton1Click:Connect(function()
-    autoParry = not autoParry
-    parryBtn.Text = autoParry and "Parry: ENABLED" or "Parry: DISABLED"
-    parryBtn.BackgroundColor3 = autoParry and Color3.fromRGB(60, 180, 60) or Color3.fromRGB(40, 40, 40)
-end)
-
-RunService.Heartbeat:Connect(function()
-    if not autoParry then return end
-    
-    local ball = getBall()
-    if ball and ball:GetAttribute("target") == player.Name then
-        local distance = (ball.Position - rootPart.Position).Magnitude
-        local velocity = ball.AssemblyLinearVelocity.Magnitude
-        
-        -- The Magic Math: If it hits in less than 0.6 seconds, block!
-        if (distance / velocity) <= 0.6 then
-            if parryRemote then
-                parryRemote:FireServer()
+local function getModifiedArgs()
+    local Alive = workspace:FindFirstChild("Alive")
+    local camera = workspace.CurrentCamera
+    local event_data = {}
+    if Alive then
+        for _, entity in pairs(Alive:GetChildren()) do
+            if entity.PrimaryPart then
+                local success, screen_point = pcall(function()
+                    return camera:WorldToScreenPoint(entity.PrimaryPart.Position)
+                end)
+                if success then event_data[entity.Name] = screen_point end
             end
         end
+    end
+    local is_mobile = UserInputService.TouchEnabled and not UserInputService.MouseEnabled
+    local final_aim_target
+    if is_mobile then
+        local viewport = camera.ViewportSize
+        final_aim_target = {viewport.X / 2, viewport.Y / 2}
+    else
+        local success, mouse = pcall(function() return UserInputService:GetMouseLocation() end)
+        if success then final_aim_target = {mouse.X, mouse.Y} else final_aim_target = {0, 0} end
+    end
+    return {
+        original_args[1] or c[1], original_args[2] or c[2], original_args[3] or c[3],
+        camera.CFrame, event_data, final_aim_target, original_args[7] or c[7]
+    }
+end
+
+-- ANIMATION
+local VirtualInputManager = game:GetService("VirtualInputManager")
+
+local function PressButton()
+    VirtualInputManager:SendMouseButtonEvent(0, 0, 0, true, game, 0)
+    VirtualInputManager:SendMouseButtonEvent(0, 0, 0, false, game, 0)
+end
+
+-- REMOTE HOOK
+local mt = getrawmetatable(game)
+local old = mt.__index
+setreadonly(mt, false)
+mt.__index = newcclosure(function(self, key)
+    if (key == "FireServer" or key == "InvokeServer") then
+        return function(instance, ...)
+            local args = {...}
+            if #args >= 4 then
+                if not remoteHooked then remoteHooked = true end
+                remote = instance
+                f_raw = old(instance, "FireServer")
+                original_args = args
+                for i = 1, 7 do c[i] = args[i] end
+            end
+            return old(self, key)(instance, ...)
+        end
+    end
+    return old(self, key)
+end)
+setreadonly(mt, true)
+
+local ScreenGui = Instance.new("ScreenGui", game.CoreGui)
+ScreenGui.Name = "SpamHubGui"
+ScreenGui.ResetOnSpawn = false
+
+-- COUNTER UI
+local CounterFrame = Instance.new("Frame", ScreenGui)
+CounterFrame.Size = UDim2.new(0,130,0,68)
+CounterFrame.Position = UDim2.new(1,-140,0,10)
+CounterFrame.BackgroundColor3 = BLACK
+CounterFrame.BackgroundTransparency = 0.05
+CounterFrame.BorderSizePixel = 0
+Instance.new("UICorner", CounterFrame).CornerRadius = UDim.new(0,10)
+local CounterStroke = Instance.new("UIStroke", CounterFrame)
+CounterStroke.Color = ORANGE; CounterStroke.Thickness = 1.5
+
+local CpsCounterLbl = Instance.new("TextLabel", CounterFrame)
+CpsCounterLbl.Size = UDim2.new(1,-8,0,22); CpsCounterLbl.Position = UDim2.new(0,4,0,2)
+CpsCounterLbl.BackgroundTransparency = 1; CpsCounterLbl.Text = "CPS: 0"
+CpsCounterLbl.Font = Enum.Font.GothamBold; CpsCounterLbl.TextSize = 12
+CpsCounterLbl.TextColor3 = WHITE; CpsCounterLbl.TextXAlignment = Enum.TextXAlignment.Left
+
+local FpsCounterLbl = Instance.new("TextLabel", CounterFrame)
+FpsCounterLbl.Size = UDim2.new(1,-8,0,22); FpsCounterLbl.Position = UDim2.new(0,4,0,24)
+FpsCounterLbl.BackgroundTransparency = 1; FpsCounterLbl.Text = "FPS: 0"
+FpsCounterLbl.Font = Enum.Font.GothamBold; FpsCounterLbl.TextSize = 12
+FpsCounterLbl.TextColor3 = WHITE; FpsCounterLbl.TextXAlignment = Enum.TextXAlignment.Left
+
+local PingCounterLbl = Instance.new("TextLabel", CounterFrame)
+PingCounterLbl.Size = UDim2.new(1,-8,0,22); PingCounterLbl.Position = UDim2.new(0,4,0,46)
+PingCounterLbl.BackgroundTransparency = 1; PingCounterLbl.Text = "Ping: --ms"
+PingCounterLbl.Font = Enum.Font.GothamBold; PingCounterLbl.TextSize = 12
+PingCounterLbl.TextColor3 = WHITE; PingCounterLbl.TextXAlignment = Enum.TextXAlignment.Left
+
+local cDrag, cStart, cPos
+CounterFrame.InputBegan:Connect(function(inp)
+    if inp.UserInputType == Enum.UserInputType.MouseButton1 or inp.UserInputType == Enum.UserInputType.Touch then
+        cDrag = true; cStart = inp.Position; cPos = CounterFrame.Position
+        inp.Changed:Connect(function()
+            if inp.UserInputState == Enum.UserInputState.End then cDrag = false end
+        end)
+    end
+end)
+CounterFrame.InputChanged:Connect(function(inp)
+    if cDrag and (inp.UserInputType == Enum.UserInputType.MouseMovement or inp.UserInputType == Enum.UserInputType.Touch) then
+        local d = inp.Position - cStart
+        CounterFrame.Position = UDim2.new(cPos.X.Scale, cPos.X.Offset+d.X, cPos.Y.Scale, cPos.Y.Offset+d.Y)
+    end
+end)
+
+-- MAIN FRAME
+local fullSize = UDim2.new(0,210,0,285) -- SHRUNK FROM 365
+local miniSize = UDim2.new(0,210,0,32)
+
+local Frame = Instance.new("Frame", ScreenGui)
+Frame.Size = fullSize
+Frame.Position = UDim2.new(0.5,-105,0.5,-142)
+Frame.BackgroundColor3 = BLACK
+Frame.BackgroundTransparency = 0.05
+Frame.BorderSizePixel = 0
+Frame.ClipsDescendants = true
+Instance.new("UICorner", Frame).CornerRadius = UDim.new(0,14)
+
+-- ANIMATED STROKE (BORDER)
+local Stroke = Instance.new("UIStroke", Frame)
+Stroke.Color = WHITE; Stroke.Thickness = 2
+
+local StrokeGradient = Instance.new("UIGradient", Stroke)
+StrokeGradient.Color = ColorSequence.new({
+    ColorSequenceKeypoint.new(0, ORANGE),
+    ColorSequenceKeypoint.new(0.5, Color3.fromRGB(255, 200, 0)),
+    ColorSequenceKeypoint.new(1, ORANGE)
+})
+
+local TitleBar = Instance.new("Frame", Frame)
+TitleBar.Size = UDim2.new(1,0,0,32)
+TitleBar.BackgroundColor3 = ORANGE_BG
+TitleBar.BorderSizePixel = 0
+Instance.new("UICorner", TitleBar).CornerRadius = UDim.new(0,14)
+
+-- BEPO MACRO TITLE
+local Title = Instance.new("TextLabel", TitleBar)
+Title.Size = UDim2.new(0.78,0,1,0)
+Title.Position = UDim2.new(0.05,0,0,0)
+Title.BackgroundTransparency = 1
+Title.Text = "BEPO MACRO"
+Title.Font = Enum.Font.GothamBold
+Title.TextSize = 13
+Title.TextColor3 = WHITE
+Title.TextXAlignment = Enum.TextXAlignment.Left
+
+-- ANIMATED TEXT GRADIENT
+local TitleGradient = Instance.new("UIGradient", Title)
+TitleGradient.Color = ColorSequence.new({
+    ColorSequenceKeypoint.new(0, ORANGE),
+    ColorSequenceKeypoint.new(0.5, Color3.fromRGB(255, 200, 0)),
+    ColorSequenceKeypoint.new(1, ORANGE)
+})
+
+-- GRADIENT ANIMATION LOOP
+RunService.RenderStepped:Connect(function()
+    local rot = (tick() * 100) % 360
+    if StrokeGradient and TitleGradient then
+        StrokeGradient.Rotation = rot
+        TitleGradient.Rotation = rot
+    end
+end)
+
+local MinBtn = Instance.new("TextButton", TitleBar)
+MinBtn.Size = UDim2.new(0,26,0,26)
+MinBtn.Position = UDim2.new(1,-30,0.5,-13)
+MinBtn.BackgroundColor3 = ORANGE_DARK
+MinBtn.Text = "_"; MinBtn.Font = Enum.Font.GothamBold
+MinBtn.TextSize = 14; MinBtn.TextColor3 = WHITE
+MinBtn.BorderSizePixel = 0
+Instance.new("UICorner", MinBtn).CornerRadius = UDim.new(0,6)
+
+local Content = Instance.new("Frame", Frame)
+Content.Size = UDim2.new(1,0,1,-32)
+Content.Position = UDim2.new(0,0,0,32)
+Content.BackgroundTransparency = 1
+
+local StatusLabel = Instance.new("TextLabel", Content)
+StatusLabel.Size = UDim2.new(1,0,0,14)
+StatusLabel.Position = UDim2.new(0,0,0,4)
+StatusLabel.BackgroundTransparency = 1
+StatusLabel.Text = "Waiting for remote..."
+StatusLabel.Font = Enum.Font.Gotham
+StatusLabel.TextSize = 10
+StatusLabel.TextColor3 = Color3.fromRGB(150,150,150)
+
+local function makDiv(y)
+    local d = Instance.new("Frame", Content)
+    d.Size = UDim2.new(0.85,0,0,1)
+    d.Position = UDim2.new(0.075,0,0,y)
+    d.BackgroundColor3 = Color3.fromRGB(60, 30, 0); d.BorderSizePixel = 0
+end
+local function makeRow(y, txt)
+    local l = Instance.new("TextLabel", Content)
+    l.Size = UDim2.new(0.55,0,0,22); l.Position = UDim2.new(0.075,0,0,y)
+    l.BackgroundTransparency = 1; l.Text = txt
+    l.Font = Enum.Font.GothamBold; l.TextSize = 11
+    l.TextColor3 = Color3.fromRGB(220,220,220); l.TextXAlignment = Enum.TextXAlignment.Left
+end
+local function makeToggleBtn(y, txt, active)
+    local b = Instance.new("TextButton", Content)
+    b.Size = UDim2.new(0,46,0,22); b.Position = UDim2.new(1,-56,0,y)
+    b.BackgroundColor3 = active and ORANGE or Color3.fromRGB(50,50,50)
+    b.Text = txt; b.Font = Enum.Font.GothamBold; b.TextSize = 10
+    b.TextColor3 = WHITE; b.BorderSizePixel = 0
+    Instance.new("UICorner", b).CornerRadius = UDim.new(0,6)
+    return b
+end
+
+-- CPS SLIDER
+local CpsLabel = Instance.new("TextLabel", Content)
+CpsLabel.Size = UDim2.new(1,0,0,18); CpsLabel.Position = UDim2.new(0,0,0,22)
+CpsLabel.BackgroundTransparency = 1; CpsLabel.Text = "CPS: 150"
+CpsLabel.Font = Enum.Font.GothamBold; CpsLabel.TextSize = 12
+CpsLabel.TextColor3 = WHITE
+
+local SliderBg = Instance.new("Frame", Content)
+SliderBg.Size = UDim2.new(0.85,0,0,6); SliderBg.Position = UDim2.new(0.075,0,0,44)
+SliderBg.BackgroundColor3 = Color3.fromRGB(40,15,0); SliderBg.BorderSizePixel = 0
+Instance.new("UICorner", SliderBg).CornerRadius = UDim.new(1,0)
+
+local SliderFill = Instance.new("Frame", SliderBg)
+SliderFill.BackgroundColor3 = ORANGE; SliderFill.BorderSizePixel = 0
+Instance.new("UICorner", SliderFill).CornerRadius = UDim.new(1,0)
+
+local SliderKnob = Instance.new("TextButton", SliderBg)
+SliderKnob.Size = UDim2.new(0,16,0,16); SliderKnob.BackgroundColor3 = ORANGE_DARK
+SliderKnob.Text = ""; SliderKnob.BorderSizePixel = 0
+Instance.new("UICorner", SliderKnob).CornerRadius = UDim.new(1,0)
+
+local minCPS, maxCPS = 10, 450
+local draggingSlider = false
+
+local function updateSlider(val)
+    val = math.clamp(val,0,1)
+    targetCPS = math.floor(minCPS+(maxCPS-minCPS)*val)
+    SliderFill.Size = UDim2.new(val,0,1,0)
+    SliderKnob.Position = UDim2.new(val,-8,0.5,-8)
+    CpsLabel.Text = "CPS: "..targetCPS
+end
+updateSlider(0.318) -- Sets it to ~150 initially
+
+SliderKnob.InputBegan:Connect(function(i)
+    if i.UserInputType==Enum.UserInputType.MouseButton1 or i.UserInputType==Enum.UserInputType.Touch then draggingSlider=true end
+end)
+UserInputService.InputEnded:Connect(function(i)
+    if i.UserInputType==Enum.UserInputType.MouseButton1 or i.UserInputType==Enum.UserInputType.Touch then draggingSlider=false end
+end)
+UserInputService.InputChanged:Connect(function(i)
+    if draggingSlider and (i.UserInputType==Enum.UserInputType.MouseMovement or i.UserInputType==Enum.UserInputType.Touch) then
+        updateSlider((i.Position.X-SliderBg.AbsolutePosition.X)/SliderBg.AbsoluteSize.X)
+    end
+end)
+SliderBg.InputBegan:Connect(function(i)
+    if i.UserInputType==Enum.UserInputType.MouseButton1 or i.UserInputType==Enum.UserInputType.Touch then
+        updateSlider((i.Position.X-SliderBg.AbsolutePosition.X)/SliderBg.AbsoluteSize.X); draggingSlider=true
+    end
+end)
+
+-- SPAM BUTTON
+local ToggleBtn = Instance.new("TextButton", Content)
+ToggleBtn.Size = UDim2.new(0.85,0,0,32); ToggleBtn.Position = UDim2.new(0.075,0,0,60)
+ToggleBtn.BackgroundColor3 = ORANGE_DARK; ToggleBtn.Text = "SPAM: OFF"
+ToggleBtn.Font = Enum.Font.GothamBold; ToggleBtn.TextSize = 13
+ToggleBtn.TextColor3 = WHITE; ToggleBtn.BorderSizePixel = 0
+Instance.new("UICorner", ToggleBtn).CornerRadius = UDim.new(0,8)
+
+-- SPAM KEY (MOVED HERE)
+makeRow(100, "Spam Key")
+local SpamKeyBtn = Instance.new("TextButton", Content)
+SpamKeyBtn.Size = UDim2.new(0,46,0,22); SpamKeyBtn.Position = UDim2.new(1,-56,0,100)
+SpamKeyBtn.BackgroundColor3 = ORANGE_DARK; SpamKeyBtn.Text = "E"
+SpamKeyBtn.Font = Enum.Font.GothamBold; SpamKeyBtn.TextSize = 11
+SpamKeyBtn.TextColor3 = WHITE; SpamKeyBtn.BorderSizePixel = 0
+Instance.new("UICorner", SpamKeyBtn).CornerRadius = UDim.new(0,6)
+SpamKeyBtn.MouseButton1Click:Connect(function()
+    if waitingForKey then return end
+    waitingForKey = true; SpamKeyBtn.Text = "..."
+    SpamKeyBtn.BackgroundColor3 = Color3.fromRGB(200,150,0)
+    local conn
+    conn = UserInputService.InputBegan:Connect(function(inp, gp)
+        if gp then return end
+        if inp.UserInputType == Enum.UserInputType.Keyboard then
+            spamKey = inp.KeyCode
+            SpamKeyBtn.Text = inp.KeyCode.Name
+            SpamKeyBtn.BackgroundColor3 = ORANGE_DARK
+            waitingForKey = false; conn:Disconnect()
+        end
+    end)
+end)
+
+makDiv(130)
+
+-- MODE SWITCH
+makeRow(138, "Mode")
+local ModeSwitch = Instance.new("TextButton", Content)
+ModeSwitch.Size = UDim2.new(0,70,0,22); ModeSwitch.Position = UDim2.new(1,-80,0,138)
+ModeSwitch.BackgroundColor3 = Color3.fromRGB(50,50,50); ModeSwitch.Text = "TOGGLE"
+ModeSwitch.Font = Enum.Font.GothamBold; ModeSwitch.TextSize = 10
+ModeSwitch.TextColor3 = WHITE; ModeSwitch.BorderSizePixel = 0
+Instance.new("UICorner", ModeSwitch).CornerRadius = UDim.new(0,6)
+ModeSwitch.MouseButton1Click:Connect(function()
+    isHoldMode = not isHoldMode
+    ModeSwitch.Text = isHoldMode and "HOLD" or "TOGGLE"
+    ModeSwitch.BackgroundColor3 = isHoldMode and Color3.fromRGB(0,100,200) or Color3.fromRGB(50,50,50)
+    if isHoldMode then
+        spamActive = false
+        ToggleBtn.Text = "SPAM: OFF"
+        ToggleBtn.BackgroundColor3 = ORANGE_DARK
+    end
+end)
+
+makDiv(168)
+
+-- ANIM FIX
+makeRow(176, "Anim Fix")
+local AnimBtn = makeToggleBtn(176, "ON", true)
+AnimBtn.BackgroundColor3 = ORANGE
+AnimBtn.MouseButton1Click:Connect(function()
+    animFix = not animFix
+    AnimBtn.Text = animFix and "ON" or "OFF"
+    AnimBtn.BackgroundColor3 = animFix and ORANGE or Color3.fromRGB(50,50,50)
+end)
+
+makDiv(206)
+
+-- ANTI LAG
+makeRow(214, "Anti Lag")
+local AntiBtn = makeToggleBtn(214, "OFF", false)
+AntiBtn.MouseButton1Click:Connect(function()
+    antiLag = not antiLag
+    setAntiLag(antiLag)
+    AntiBtn.Text = antiLag and "ON" or "OFF"
+    AntiBtn.BackgroundColor3 = antiLag and ORANGE or Color3.fromRGB(50,50,50)
+end)
+
+makDiv(244)
+
+local HintLabel = Instance.new("TextLabel", Content)
+HintLabel.Size = UDim2.new(1,0,0,14); HintLabel.Position = UDim2.new(0,0,0,252)
+HintLabel.BackgroundTransparency = 1; HintLabel.Text = "_  Hide UI"
+HintLabel.Font = Enum.Font.Gotham; HintLabel.TextSize = 9
+HintLabel.TextColor3 = Color3.fromRGB(100,70,30)
+
+local function setOpen(state)
+    isOpen = state
+    TweenService:Create(Frame, TweenInfo.new(0.25,Enum.EasingStyle.Quad,Enum.EasingDirection.Out),{
+        Size = state and fullSize or miniSize
+    }):Play()
+    MinBtn.Text = state and "_" or "▲"
+end
+MinBtn.MouseButton1Click:Connect(function() setOpen(not isOpen) end)
+
+local function toggleSpam()
+    if isHoldMode then return end
+    if not remote then
+        StatusLabel.Text = "Block first!"
+        StatusLabel.TextColor3 = Color3.fromRGB(255,80,80)
+        return
+    end
+    spamActive = not spamActive; spamAccum = 0
+    ToggleBtn.Text = spamActive and "SPAM: ON" or "SPAM: OFF"
+    ToggleBtn.BackgroundColor3 = spamActive and ORANGE or ORANGE_DARK
+end
+ToggleBtn.MouseButton1Click:Connect(toggleSpam)
+
+local dragging, dragStart, startPos
+TitleBar.InputBegan:Connect(function(input)
+    if input.UserInputType==Enum.UserInputType.MouseButton1 or input.UserInputType==Enum.UserInputType.Touch then
+        dragging=true; dragStart=input.Position; startPos=Frame.Position
+        input.Changed:Connect(function()
+            if input.UserInputState==Enum.UserInputState.End then dragging=false end
+        end)
+    end
+end)
+TitleBar.InputChanged:Connect(function(input)
+    if dragging and (input.UserInputType==Enum.UserInputType.MouseMovement or input.UserInputType==Enum.UserInputType.Touch) then
+        local delta=input.Position-dragStart
+        Frame.Position=UDim2.new(startPos.X.Scale,startPos.X.Offset+delta.X,startPos.Y.Scale,startPos.Y.Offset+delta.Y)
+    end
+end)
+
+UserInputService.InputBegan:Connect(function(input, gp)
+    if gp or waitingForKey then return end
+    if input.KeyCode==Enum.KeyCode.LeftAlt or input.KeyCode==Enum.KeyCode.RightAlt then
+        setOpen(not isOpen)
+    elseif input.KeyCode==spamKey then
+        if isHoldMode then
+            if not remote then return end
+            holdActive=true; spamAccum=0
+            ToggleBtn.Text="SPAM: ON"
+            ToggleBtn.BackgroundColor3=ORANGE
+        else
+            toggleSpam()
+        end
+    end
+end)
+UserInputService.InputEnded:Connect(function(input)
+    if input.KeyCode==spamKey and isHoldMode then
+        holdActive=false
+        ToggleBtn.Text="SPAM: OFF"
+        ToggleBtn.BackgroundColor3=ORANGE_DARK
+    end
+end)
+
+task.spawn(function()
+    while not remoteHooked do task.wait(0.1) end
+    StatusLabel.Text = "Ready"
+    StatusLabel.TextColor3 = ORANGE
+end)
+
+-- HEARTBEAT
+RunService.Heartbeat:Connect(function(dt)
+    fpsCount+=1; fpsTimer+=dt; frameTime+=dt
+
+    if fpsTimer>=1 then
+        local fps=math.floor(fpsCount/fpsTimer)
+        fpsCount=0; fpsTimer=0
+        FpsCounterLbl.Text="FPS: "..fps
+        pcall(function()
+            local ping=math.floor(StatsService.Network.ServerStatsItem["Data Ping"]:GetValue())
+            PingCounterLbl.Text="Ping: "..ping.."ms"
+        end)
+    end
+
+    if frameTime>=0.1 then
+        local real=math.floor(frameFireCount/frameTime)
+        CpsCounterLbl.Text="CPS: "..real
+        frameFireCount=0; frameTime=0
+    end
+
+    local doSpam=(isHoldMode and holdActive) or (not isHoldMode and spamActive)
+
+    if doSpam and remote and f_raw then
+        spamAccum=spamAccum+dt*targetCPS
+        local fires=math.floor(spamAccum)
+        if fires>0 then
+            spamAccum=spamAccum-fires
+            local modified_args=getModifiedArgs()
+            for _=1,fires do
+                pcall(function()
+                    if remote:IsA('RemoteEvent') then
+                        f_raw(remote,unpack(modified_args))
+                    elseif remote:IsA('RemoteFunction') then
+                        remote:InvokeServer(unpack(modified_args))
+                    end
+                    frameFireCount+=1
+                end)
+            end
+        end
+        if animFix then PressButton() end
+    else
+        spamAccum=0
     end
 end)
