@@ -18,7 +18,7 @@ local original_args = {}
 local spamActive = false
 local animFix = true
 local antiLag = false
-local targetCPS = 150 -- Adjusted default to match your screenshot
+local targetCPS = 150
 local spamAccum = 0
 local remoteHooked = false
 local isOpen = true
@@ -29,16 +29,19 @@ local fpsTimer = 0
 local frameFireCount = 0
 local frameTime = 0
 
-local spamKey = Enum.KeyCode.E -- Changed default to E
+local spamKey = Enum.KeyCode.E
 local waitingForKey = false
+
+-- Mobile detection
+local isMobile = UserInputService.TouchEnabled and not UserInputService.MouseEnabled
 
 local ORANGE = Color3.fromRGB(255, 140, 0)
 local ORANGE_DARK = Color3.fromRGB(180, 80, 0)
 local ORANGE_BG = Color3.fromRGB(30, 10, 0)
-local BLACK = Color3.fromRGB(12, 12, 12) -- Slightly lighter black for cleaner look
+local BLACK = Color3.fromRGB(12, 12, 12)
 local WHITE = Color3.new(1,1,1)
 
--- ANTI LAG
+-- ANTI LAG (unchanged)
 local antiLagConn = nil
 local function setAntiLag(state)
     antiLag = state
@@ -64,6 +67,7 @@ local function setAntiLag(state)
 end
 
 local function getModifiedArgs()
+    -- same as your original
     local Alive = workspace:FindFirstChild("Alive")
     local camera = workspace.CurrentCamera
     local event_data = {}
@@ -92,15 +96,14 @@ local function getModifiedArgs()
     }
 end
 
--- ANIMATION
+-- ANIMATION (same)
 local VirtualInputManager = game:GetService("VirtualInputManager")
-
 local function PressButton()
     VirtualInputManager:SendMouseButtonEvent(0, 0, 0, true, game, 0)
     VirtualInputManager:SendMouseButtonEvent(0, 0, 0, false, game, 0)
 end
 
--- REMOTE HOOK
+-- REMOTE HOOK (same)
 local mt = getrawmetatable(game)
 local old = mt.__index
 setreadonly(mt, false)
@@ -126,7 +129,7 @@ local ScreenGui = Instance.new("ScreenGui", game.CoreGui)
 ScreenGui.Name = "SpamHubGui"
 ScreenGui.ResetOnSpawn = false
 
--- COUNTER UI
+-- COUNTER UI (unchanged)
 local CounterFrame = Instance.new("Frame", ScreenGui)
 CounterFrame.Size = UDim2.new(0,130,0,68)
 CounterFrame.Position = UDim2.new(1,-140,0,10)
@@ -171,23 +174,22 @@ CounterFrame.InputChanged:Connect(function(inp)
     end
 end)
 
--- MAIN FRAME
-local fullSize = UDim2.new(0,210,0,285) -- SHRUNK FROM 365
+-- MAIN FRAME - HEIGHT INCREASED TO 305
+local fullSize = UDim2.new(0,210,0,305)  -- was 285
 local miniSize = UDim2.new(0,210,0,32)
 
 local Frame = Instance.new("Frame", ScreenGui)
 Frame.Size = fullSize
-Frame.Position = UDim2.new(0.5,-105,0.5,-142)
+Frame.Position = UDim2.new(0.5,-105,0.5,-152)  -- adjusted vertical centering
 Frame.BackgroundColor3 = BLACK
 Frame.BackgroundTransparency = 0.05
 Frame.BorderSizePixel = 0
 Frame.ClipsDescendants = true
 Instance.new("UICorner", Frame).CornerRadius = UDim.new(0,14)
 
--- ANIMATED STROKE (BORDER)
+-- ANIMATED STROKE (unchanged)
 local Stroke = Instance.new("UIStroke", Frame)
 Stroke.Color = WHITE; Stroke.Thickness = 2
-
 local StrokeGradient = Instance.new("UIGradient", Stroke)
 StrokeGradient.Color = ColorSequence.new({
     ColorSequenceKeypoint.new(0, ORANGE),
@@ -201,7 +203,6 @@ TitleBar.BackgroundColor3 = ORANGE_BG
 TitleBar.BorderSizePixel = 0
 Instance.new("UICorner", TitleBar).CornerRadius = UDim.new(0,14)
 
--- BEPO MACRO TITLE
 local Title = Instance.new("TextLabel", TitleBar)
 Title.Size = UDim2.new(0.78,0,1,0)
 Title.Position = UDim2.new(0.05,0,0,0)
@@ -212,7 +213,6 @@ Title.TextSize = 13
 Title.TextColor3 = WHITE
 Title.TextXAlignment = Enum.TextXAlignment.Left
 
--- ANIMATED TEXT GRADIENT
 local TitleGradient = Instance.new("UIGradient", Title)
 TitleGradient.Color = ColorSequence.new({
     ColorSequenceKeypoint.new(0, ORANGE),
@@ -220,7 +220,6 @@ TitleGradient.Color = ColorSequence.new({
     ColorSequenceKeypoint.new(1, ORANGE)
 })
 
--- GRADIENT ANIMATION LOOP
 RunService.RenderStepped:Connect(function()
     local rot = (tick() * 100) % 360
     if StrokeGradient and TitleGradient then
@@ -275,7 +274,7 @@ local function makeToggleBtn(y, txt, active)
     return b
 end
 
--- CPS SLIDER
+-- CPS SLIDER (unchanged)
 local CpsLabel = Instance.new("TextLabel", Content)
 CpsLabel.Size = UDim2.new(1,0,0,18); CpsLabel.Position = UDim2.new(0,0,0,22)
 CpsLabel.BackgroundTransparency = 1; CpsLabel.Text = "CPS: 150"
@@ -306,7 +305,7 @@ local function updateSlider(val)
     SliderKnob.Position = UDim2.new(val,-8,0.5,-8)
     CpsLabel.Text = "CPS: "..targetCPS
 end
-updateSlider(0.318) -- Sets it to ~150 initially
+updateSlider(0.318)
 
 SliderKnob.InputBegan:Connect(function(i)
     if i.UserInputType==Enum.UserInputType.MouseButton1 or i.UserInputType==Enum.UserInputType.Touch then draggingSlider=true end
@@ -325,7 +324,7 @@ SliderBg.InputBegan:Connect(function(i)
     end
 end)
 
--- SPAM BUTTON
+-- SPAM BUTTON (original)
 local ToggleBtn = Instance.new("TextButton", Content)
 ToggleBtn.Size = UDim2.new(0.85,0,0,32); ToggleBtn.Position = UDim2.new(0.075,0,0,60)
 ToggleBtn.BackgroundColor3 = ORANGE_DARK; ToggleBtn.Text = "SPAM: OFF"
@@ -333,7 +332,7 @@ ToggleBtn.Font = Enum.Font.GothamBold; ToggleBtn.TextSize = 13
 ToggleBtn.TextColor3 = WHITE; ToggleBtn.BorderSizePixel = 0
 Instance.new("UICorner", ToggleBtn).CornerRadius = UDim.new(0,8)
 
--- SPAM KEY (MOVED HERE)
+-- SPAM KEY
 makeRow(100, "Spam Key")
 local SpamKeyBtn = Instance.new("TextButton", Content)
 SpamKeyBtn.Size = UDim2.new(0,46,0,22); SpamKeyBtn.Position = UDim2.new(1,-56,0,100)
@@ -373,8 +372,7 @@ ModeSwitch.MouseButton1Click:Connect(function()
     ModeSwitch.BackgroundColor3 = isHoldMode and Color3.fromRGB(0,100,200) or Color3.fromRGB(50,50,50)
     if isHoldMode then
         spamActive = false
-        ToggleBtn.Text = "SPAM: OFF"
-        ToggleBtn.BackgroundColor3 = ORANGE_DARK
+        updateSpamUI()  -- update both buttons
     end
 end)
 
@@ -410,6 +408,60 @@ HintLabel.BackgroundTransparency = 1; HintLabel.Text = "_  Hide UI"
 HintLabel.Font = Enum.Font.Gotham; HintLabel.TextSize = 9
 HintLabel.TextColor3 = Color3.fromRGB(100,70,30)
 
+-- ======================
+-- ADDED MOBILE BUTTON
+-- ======================
+local MobileToggleBtn = nil
+if isMobile then
+    MobileToggleBtn = Instance.new("TextButton", Content)
+    MobileToggleBtn.Size = UDim2.new(0,80,0,24)  -- smaller
+    MobileToggleBtn.Position = UDim2.new(0.5,-40,0,272)  -- centered below hint
+    MobileToggleBtn.BackgroundColor3 = ORANGE_DARK
+    MobileToggleBtn.Text = "SPAM: OFF"
+    MobileToggleBtn.Font = Enum.Font.GothamBold
+    MobileToggleBtn.TextSize = 11
+    MobileToggleBtn.TextColor3 = WHITE
+    MobileToggleBtn.BorderSizePixel = 0
+    Instance.new("UICorner", MobileToggleBtn).CornerRadius = UDim.new(0,8)
+end
+
+-- Function to update both spam buttons' appearance
+local function updateSpamUI()
+    local stateText = spamActive and "ON" or "OFF"
+    local bgColor = spamActive and ORANGE or ORANGE_DARK
+    ToggleBtn.Text = "SPAM: "..stateText
+    ToggleBtn.BackgroundColor3 = bgColor
+    if MobileToggleBtn then
+        MobileToggleBtn.Text = "SPAM: "..stateText
+        MobileToggleBtn.BackgroundColor3 = bgColor
+    end
+end
+
+-- Original toggle logic
+local function toggleSpam()
+    if isHoldMode then
+        if not remote then
+            StatusLabel.Text = "Block first!"
+            StatusLabel.TextColor3 = Color3.fromRGB(255,80,80)
+        end
+        return
+    end
+    if not remote then
+        StatusLabel.Text = "Block first!"
+        StatusLabel.TextColor3 = Color3.fromRGB(255,80,80)
+        return
+    end
+    spamActive = not spamActive
+    spamAccum = 0
+    updateSpamUI()
+end
+
+ToggleBtn.MouseButton1Click:Connect(toggleSpam)
+if MobileToggleBtn then
+    MobileToggleBtn.MouseButton1Click:Connect(toggleSpam)
+end
+
+-- (rest of your original code: setOpen, dragging, input handlers, etc.)
 local function setOpen(state)
     isOpen = state
     TweenService:Create(Frame, TweenInfo.new(0.25,Enum.EasingStyle.Quad,Enum.EasingDirection.Out),{
@@ -418,19 +470,6 @@ local function setOpen(state)
     MinBtn.Text = state and "_" or "▲"
 end
 MinBtn.MouseButton1Click:Connect(function() setOpen(not isOpen) end)
-
-local function toggleSpam()
-    if isHoldMode then return end
-    if not remote then
-        StatusLabel.Text = "Block first!"
-        StatusLabel.TextColor3 = Color3.fromRGB(255,80,80)
-        return
-    end
-    spamActive = not spamActive; spamAccum = 0
-    ToggleBtn.Text = spamActive and "SPAM: ON" or "SPAM: OFF"
-    ToggleBtn.BackgroundColor3 = spamActive and ORANGE or ORANGE_DARK
-end
-ToggleBtn.MouseButton1Click:Connect(toggleSpam)
 
 local dragging, dragStart, startPos
 TitleBar.InputBegan:Connect(function(input)
@@ -458,6 +497,10 @@ UserInputService.InputBegan:Connect(function(input, gp)
             holdActive=true; spamAccum=0
             ToggleBtn.Text="SPAM: ON"
             ToggleBtn.BackgroundColor3=ORANGE
+            if MobileToggleBtn then
+                MobileToggleBtn.Text="SPAM: ON"
+                MobileToggleBtn.BackgroundColor3=ORANGE
+            end
         else
             toggleSpam()
         end
@@ -468,6 +511,10 @@ UserInputService.InputEnded:Connect(function(input)
         holdActive=false
         ToggleBtn.Text="SPAM: OFF"
         ToggleBtn.BackgroundColor3=ORANGE_DARK
+        if MobileToggleBtn then
+            MobileToggleBtn.Text="SPAM: OFF"
+            MobileToggleBtn.BackgroundColor3=ORANGE_DARK
+        end
     end
 end)
 
@@ -477,7 +524,7 @@ task.spawn(function()
     StatusLabel.TextColor3 = ORANGE
 end)
 
--- HEARTBEAT
+-- HEARTBEAT (unchanged except updating both buttons in hold mode)
 RunService.Heartbeat:Connect(function(dt)
     fpsCount+=1; fpsTimer+=dt; frameTime+=dt
 
