@@ -1,5 +1,5 @@
--- All-visible-animation edition. Runs immediately and writes a Studio-openable
--- .rbxl place plus a .json report. See animation-exporter-all-README.md.
+-- Auto test AnimationUi dances, capture observed IDs, then save a .rbxl
+-- place and .json report. See animation-exporter-gui-auto-README.md.
 --!native
 --!optimize 2
 --!divine-intellect
@@ -6741,315 +6741,637 @@ local function synsaveinstance(...)
 	return ok, err, placename
 end
 
--- Export every Animation and existing KeyframeSequence visible in this client.
-local function makeAnimationStatus()
-	local gui
-	local label
-	local ok = pcall(function()
-		gui = Instance.new("ScreenGui")
-		gui.Name = "AnimationExportProgress"
-		gui.DisplayOrder = 2e9
-		gui.ResetOnSpawn = false
-		gui.IgnoreGuiInset = true
-
-		label = Instance.new("TextLabel")
-		label.Name = "Status"
-		label.Position = UDim2.fromOffset(12, 12)
-		label.Size = UDim2.fromOffset(650, 64)
-		label.BackgroundColor3 = Color3.new(0, 0, 0)
-		label.BackgroundTransparency = 0.2
-		label.TextColor3 = Color3.new(1, 1, 1)
-		label.TextSize = 18
-		label.TextWrapped = true
-		label.Font = Enum.Font.Code
-		label.TextXAlignment = Enum.TextXAlignment.Left
-		label.Parent = gui
-
-		local parents = {}
-		if global_container.gethui then
-			local found, parent = pcall(global_container.gethui)
-			if found and parent then
-				parents[#parents + 1] = parent
-			end
-		end
-		parents[#parents + 1] = game:GetService("CoreGui")
-		local player = game:GetService("Players").LocalPlayer
-		if player then
-			parents[#parents + 1] = player:FindFirstChildOfClass("PlayerGui")
-		end
-		for _, parent in parents do
-			local attached = pcall(function()
-				local old = parent:FindFirstChild(gui.Name)
-				if old then
-					old:Destroy()
-				end
-				gui.Parent = parent
-			end)
-			if attached then
-				break
-			end
-		end
-	end)
-	if not ok or not gui or not gui.Parent then
-		if gui then
-			gui:Destroy()
-		end
-		label = nil
-	end
-
-	local function update(message, color, log)
-		if label and label.Parent then
-			label.Text = "Animation export: " .. message
-			label.TextColor3 = color or Color3.new(1, 1, 1)
-		end
-		if log ~= false then
-			print("[Animation export] " .. message)
-		end
-	end
-	local function finish(message, success)
-		update(message, success and Color3.fromRGB(85, 255, 110) or Color3.fromRGB(255, 100, 100))
-		if gui and gui.Parent then
-			task.delay(25, function()
-				gui:Destroy()
-			end)
-		end
-	end
-	return update, finish
+-- Record animation IDs that become visible on the local player's Animator.
+-- The optional auto test follows this game's client-visible dance list and
+-- uses the same RemoteEvent as its GUI. It never reads hidden server code.
+local Players = game:GetService("Players")
+local player = Players.LocalPlayer
+if not player then
+	warn("[Animation capture] A local player is required.")
+	return nil
 end
 
-local function exportAnimations(config)
-	config = config or {}
-	local updateProgress, finishProgress = makeAnimationStatus()
-	local placeName
-	if not config.FilePath then
-		updateProgress("Reading game name for output file...")
-		local ok, info = pcall(function()
-			return game:GetService("MarketplaceService"):GetProductInfoAsync(game.PlaceId)
+local gui = Instance.new("ScreenGui")
+gui.Name = "ObservedAnimationCapture"
+gui.ResetOnSpawn = false
+gui.DisplayOrder = 2000000000
+local panel = Instance.new("Frame")
+panel.Name = "Panel"
+panel.Position = UDim2.new(1, -468, 0, 70)
+panel.Size = UDim2.fromOffset(456, 416)
+panel.BackgroundColor3 = Color3.fromRGB(22, 28, 36)
+panel.BorderSizePixel = 0
+panel.Parent = gui
+local function makeLabel(className, name, textValue, x, y, w, h)
+	local label = Instance.new(className)
+	label.Name = name
+	label.Position = UDim2.fromOffset(x, y)
+	label.Size = UDim2.fromOffset(w, h)
+	label.BackgroundColor3 = Color3.fromRGB(42, 54, 68)
+	label.BorderSizePixel = 0
+	label.TextColor3 = Color3.fromRGB(245, 248, 250)
+	label.Font = Enum.Font.SourceSans
+	label.TextSize = 17
+	label.Text = textValue
+	label.Parent = panel
+	return label
+end
+local title = makeLabel("TextLabel", "Title", "Dance capture", 8, 8, 440, 25)
+title.BackgroundTransparency = 1
+title.TextXAlignment = Enum.TextXAlignment.Left
+local status = makeLabel("TextLabel", "Status", "Watching your character's animations...", 8, 36, 440, 50)
+status.BackgroundTransparency = 1
+status.TextWrapped = true
+status.TextXAlignment = Enum.TextXAlignment.Left
+local progress = makeLabel("TextLabel", "Progress", "Auto test: not started", 8, 88, 440, 25)
+progress.BackgroundTransparency = 1
+progress.TextXAlignment = Enum.TextXAlignment.Left
+local list = Instance.new("ScrollingFrame")
+list.Name = "Results"
+list.Position = UDim2.fromOffset(8, 118)
+list.Size = UDim2.fromOffset(440, 218)
+list.BackgroundColor3 = Color3.fromRGB(15, 20, 27)
+list.BorderSizePixel = 0
+list.ScrollBarThickness = 7
+list.CanvasSize = UDim2.fromOffset(0, 0)
+list.Parent = panel
+local layout = Instance.new("UIListLayout")
+layout.SortOrder = Enum.SortOrder.LayoutOrder
+layout.Padding = UDim.new(0, 2)
+layout.Parent = list
+local autoButton = makeLabel("TextButton", "AutoTest", "Auto test GUI", 8, 344, 137, 30)
+local stopButton = makeLabel("TextButton", "StopAuto", "Stop", 151, 344, 65, 30)
+local toggle = makeLabel("TextButton", "Toggle", "Pause capture", 222, 344, 112, 30)
+local closeButton = makeLabel("TextButton", "Close", "Close", 340, 344, 108, 30)
+local saveButton = makeLabel("TextButton", "Save", "Save .rbxl", 8, 380, 440, 28)
+
+local parents = {}
+if global_container.gethui then
+	local ok, parent = pcall(global_container.gethui)
+	if ok and parent then
+		parents[#parents + 1] = parent
+	end
+end
+parents[#parents + 1] = game:GetService("CoreGui")
+parents[#parents + 1] = player:FindFirstChildOfClass("PlayerGui")
+for _, parent in parents do
+	if parent then
+		local ok = pcall(function()
+			local old = parent:FindFirstChild(gui.Name)
+			if old then
+				old:Destroy()
+			end
+			gui.Parent = parent
 		end)
-		if ok and info and type(info.Name) == "string" then
-			placeName = info.Name
-		end
-		if not placeName or placeName == "" then
-			placeName = game.Name
+		if ok and gui.Parent then
+			break
 		end
 	end
-	local safeName = placeName and string.sub(
+end
+if not gui.Parent then
+	gui:Destroy()
+	warn("[Animation capture] Could not show capture controls.")
+	return nil
+end
+
+local captured = {}
+local count = 0
+local unidentified = setmetatable({}, { __mode = "k" })
+local unidentifiedCount = 0
+local animators = {}
+local connections = {}
+local capturing = true
+local exporting = false
+local autoRunning = false
+local autoStop = false
+local autoScheduled = true
+local autoCurrentName = nil
+local autoSeen = nil
+local autoBaselineTracks = nil
+local autoResults = {}
+local function setAutoProgress(message)
+	if gui.Parent then
+		progress.Text = "Auto test: " .. message
+	end
+end
+local function makeResultRow(index, category, name)
+	local row = Instance.new("TextLabel")
+	row.Name = "Result" .. index
+	row.LayoutOrder = index
+	row.Size = UDim2.new(1, -10, 0, 26)
+	row.BackgroundColor3 = Color3.fromRGB(34, 43, 54)
+	row.BorderSizePixel = 0
+	row.TextColor3 = Color3.fromRGB(240, 244, 247)
+	row.Font = Enum.Font.SourceSans
+	row.TextSize = 16
+	row.TextXAlignment = Enum.TextXAlignment.Left
+	row.TextTruncate = Enum.TextTruncate.AtEnd
+	row.Text = string.format("  %d. %s / %s — waiting", index, category, name)
+	row.Parent = list
+	list.CanvasSize = UDim2.fromOffset(0, index * 28)
+	return row
+end
+local function showStatus(message)
+	if gui.Parent then
+		status.Text = message
+	end
+	print("[Animation capture] " .. message)
+end
+local function currentDanceName()
+	local value = player:GetAttribute("DanceName")
+	return type(value) == "string" and value ~= "" and value or nil
+end
+local function recordTrack(track, startedNow)
+	if not capturing or exporting then
+		return
+	end
+	local ok, animation = pcall(function()
+		return track.Animation
+	end)
+	if ok and typeof(animation) == "Instance" and animation:IsA("Animation") then
+		local idOk, id = pcall(function()
+			return animation.AnimationId
+		end)
+		if idOk and type(id) == "string" and id ~= "" then
+			if autoSeen and autoCurrentName
+				and (startedNow or not (autoBaselineTracks and autoBaselineTracks[track])) then
+				autoSeen[id] = true
+			end
+			if unidentified[track] then
+				unidentified[track] = nil
+				unidentifiedCount -= 1
+			end
+			local label = currentDanceName() or animation.Name
+			if not captured[id] then
+				captured[id] = { animationId = id, name = label, names = { label } }
+				count += 1
+				showStatus("Captured " .. count .. " IDs; " .. unidentifiedCount
+					.. " tracks without readable IDs. Play each dance, then Save .rbxl.")
+			elseif label ~= captured[id].name then
+				local known = false
+				for _, name in captured[id].names do
+					if name == label then
+						known = true
+						break
+					end
+				end
+				if not known then
+					captured[id].names[#captured[id].names + 1] = label
+				end
+			end
+			return
+		end
+	end
+	if not unidentified[track] then
+		unidentified[track] = true
+		unidentifiedCount += 1
+		showStatus("Captured " .. count .. " IDs; " .. unidentifiedCount
+			.. " tracks without readable IDs.")
+	end
+end
+local function attachAnimator(animator)
+	if animators[animator] then
+		return
+	end
+	animators[animator] = true
+	connections[#connections + 1] = animator.AnimationPlayed:Connect(function(track)
+		recordTrack(track, true)
+	end)
+end
+local function attachCharacter(character)
+	for _, instance in character:GetDescendants() do
+		if instance:IsA("Animator") then
+			attachAnimator(instance)
+		end
+	end
+	connections[#connections + 1] = character.DescendantAdded:Connect(function(instance)
+		if instance:IsA("Animator") then
+			attachAnimator(instance)
+		end
+	end)
+end
+if player.Character then
+	attachCharacter(player.Character)
+end
+connections[#connections + 1] = player.CharacterAdded:Connect(attachCharacter)
+connections[#connections + 1] = player:GetAttributeChangedSignal("DanceName"):Connect(function()
+	if not capturing or not player.Character then
+		return
+	end
+	for animator in animators do
+		if animator:IsDescendantOf(player.Character) then
+			local ok, tracks = pcall(animator.GetPlayingAnimationTracks, animator)
+			if ok then
+				for _, track in tracks do
+					recordTrack(track)
+				end
+			end
+		end
+	end
+end)
+task.spawn(function()
+	while gui.Parent do
+		if capturing and not exporting and player.Character then
+			for animator in animators do
+				if animator:IsDescendantOf(player.Character) then
+					local ok, tracks = pcall(animator.GetPlayingAnimationTracks, animator)
+					if ok then
+						for _, track in tracks do
+							recordTrack(track)
+						end
+					end
+				end
+			end
+		end
+		task.wait(0.75)
+	end
+end)
+
+-- This mode is specific to AnimationUi's documented client-side flow in this
+-- place: Shared.Animations supplies names, and the GUI sends a name to
+-- Remotes.Animation.UpdateAnimation. It cannot enumerate server-only names.
+local function getAutoQueue()
+	local storage = game:GetService("ReplicatedStorage")
+	local shared = storage:FindFirstChild("Shared")
+	local source = shared and shared:FindFirstChild("Animations")
+	local remotes = storage:FindFirstChild("Remotes")
+	local animationRemotes = remotes and remotes:FindFirstChild("Animation")
+	local update = animationRemotes and animationRemotes:FindFirstChild("UpdateAnimation")
+	if not source or not source:IsA("ModuleScript") then
+		return nil, nil, "Shared.Animations list is not client-visible"
+	end
+	if not update or not update:IsA("RemoteEvent") then
+		return nil, nil, "AnimationUi's UpdateAnimation event is unavailable"
+	end
+	local ok, data = pcall(require, source)
+	if not ok or type(data) ~= "table" then
+		return nil, nil, "Could not read the client-visible GUI list: " .. tostring(data)
+	end
+	local queue = {}
+	local seenNames = {}
+	for _, category in { "Dances", "Emotes" } do
+		local entries = data[category]
+		if type(entries) == "table" then
+			for _, entry in ipairs(entries) do
+				local name = type(entry) == "table" and entry[1] or nil
+				if type(name) == "string" and name ~= "" and not seenNames[name] then
+					seenNames[name] = true
+					queue[#queue + 1] = { name = name, category = category }
+				end
+			end
+		end
+	end
+	if #queue == 0 then
+		return nil, nil, "The client-visible GUI list has no dance or emote names"
+	end
+	return queue, update
+end
+
+local function runAutoTest()
+	setAutoProgress("reading GUI dance list...")
+	local queue, update, err = getAutoQueue()
+	if not queue then
+		showStatus("Auto test unavailable: " .. err .. ". Manual capture still works.")
+		setAutoProgress("unavailable")
+		return
+	end
+	if player:GetAttribute("SyncLeaderId") then
+		showStatus("Leave dance sync first; this GUI ignores requests while following a leader.")
+		setAutoProgress("stopped")
+		return
+	end
+	for _, child in list:GetChildren() do
+		if child:IsA("TextLabel") then
+			child:Destroy()
+		end
+	end
+	list.CanvasSize = UDim2.fromOffset(0, 0)
+	table.clear(autoResults)
+	local rows = {}
+	for index, item in queue do
+		rows[index] = makeResultRow(index, item.category, item.name)
+	end
+	showStatus("Auto test started: " .. #queue .. " GUI names. About 2 seconds per name; Stop cancels.")
+	local attempted = 0
+	for index, item in queue do
+		if autoStop or not gui.Parent or exporting then
+			break
+		end
+		if player:GetAttribute("SyncLeaderId") then
+			showStatus("Auto test stopped because your character joined dance sync.")
+			break
+		end
+		setAutoProgress(index .. "/" .. #queue .. "  " .. item.name .. "  |  captured IDs: " .. count)
+		local row = rows[index]
+		row.Text = string.format("  %d. %s / %s — requesting", index, item.category, item.name)
+		list.CanvasPosition = Vector2.new(0, math.max(0, (index - 7) * 28))
+		autoCurrentName = item.name
+		autoSeen = {}
+		autoBaselineTracks = {}
+		if player.Character then
+			for animator in animators do
+				if animator:IsDescendantOf(player.Character) then
+					local ok, tracks = pcall(animator.GetPlayingAnimationTracks, animator)
+					if ok then
+						for _, track in tracks do
+							autoBaselineTracks[track] = true
+						end
+					end
+				end
+			end
+		end
+		local beforeCount = count
+		local requested, requestErr = pcall(function()
+			update:FireServer(item.name)
+		end)
+		attempted += 1
+		if requested then
+			for _ = 1, 20 do
+				if autoStop or not gui.Parent then
+					break
+				end
+				task.wait(0.1)
+			end
+		end
+		local ids = {}
+		for id in autoSeen do
+			ids[#ids + 1] = id
+		end
+		table.sort(ids)
+		local confirmed = player:GetAttribute("DanceName") == item.name
+		local outcome
+		if not requested then
+			outcome = "request failed"
+		elseif #ids > 0 and confirmed then
+			outcome = "played; " .. #ids .. " ID(s) seen"
+		elseif confirmed then
+			outcome = "played; ID unreadable"
+		elseif #ids > 0 then
+			outcome = "track seen; name unconfirmed"
+		else
+			outcome = "no play/ID confirmation"
+		end
+		row.Text = string.format("  %d. %s / %s — %s", index, item.category, item.name, outcome)
+		autoResults[#autoResults + 1] = {
+			name = item.name,
+			category = item.category,
+			outcome = outcome,
+			observedIds = ids,
+			newUniqueIds = count - beforeCount,
+			requestError = not requested and tostring(requestErr) or nil,
+		}
+		autoCurrentName = nil
+		autoSeen = nil
+		autoBaselineTracks = nil
+	end
+	-- AnimationUi's Stop button sends nil to this same RemoteEvent.
+	pcall(function()
+		update:FireServer(nil)
+	end)
+	setAutoProgress(string.format("%s; tried %d/%d; captured %d IDs",
+		autoStop and "stopped" or "finished", attempted, #queue, count))
+	showStatus("Auto test finished. Review the list, then press Save .rbxl.")
+end
+
+local function outputName()
+	showStatus("Reading game name for output file...")
+	local placeName
+	local ok, info = pcall(function()
+		return game:GetService("MarketplaceService"):GetProductInfoAsync(game.PlaceId)
+	end)
+	if ok and info and type(info.Name) == "string" then
+		placeName = info.Name
+	end
+	if not placeName or placeName == "" then
+		placeName = game.Name
+	end
+	local safeName = string.sub(
 		string.gsub(string.gsub(placeName, "[^%w _%-]", ""), "%s+", "-"), 1, 80)
-	if safeName then
-		safeName = string.gsub(string.gsub(safeName, "^%-+", ""), "%-+$", "")
-	end
-	if not safeName or safeName == "" or safeName == "Game" then
+	safeName = string.gsub(string.gsub(safeName, "^%-+", ""), "%-+$", "")
+	if safeName == "" or safeName == "Game" then
 		safeName = "place-" .. tostring(game.PlaceId)
 	end
-	local filePath = config.FilePath or (safeName .. "-all-animations.rbxl")
-	local lowerPath = string.lower(filePath)
-	if string.sub(lowerPath, -5) == ".rbxm" then
-		filePath = string.sub(filePath, 1, -6) .. ".rbxl"
-	elseif string.sub(lowerPath, -5) ~= ".rbxl" then
-		filePath ..= ".rbxl"
-	end
+	return safeName .. "-observed-dances.rbxl", placeName
+end
+
+local function exportCaptured()
+	local filePath, placeName = outputName()
 	local reportPath = string.sub(filePath, 1, -6) .. ".json"
 	local report = {
 		outputFile = filePath,
-		outputFormat = "place",
 		reportFile = reportPath,
 		placeId = game.PlaceId,
 		placeName = placeName,
+		captureMethod = "local character Animator tracks while GUI was used",
+		tracksWithoutReadableId = unidentifiedCount,
+		autoTestResults = autoResults,
 		animations = {},
-		existingSequences = {},
-		curveAnimations = {},
 		status = "not_started",
 	}
+	local records = {}
+	for _, record in captured do
+		records[#records + 1] = record
+	end
+	table.sort(records, function(a, b)
+		return a.name < b.name or a.name == b.name and a.animationId < b.animationId
+	end)
 	local roots = {}
-	local seenId = {}
-	local animations = {}
-
-	-- GetDescendants sees only instances replicated to this client. It does not
-	-- inspect nil instances or request server-only services.
-	updateProgress("Scanning all client-visible objects...")
-	local descendants = game:GetDescendants()
-	for index, instance in descendants do
-		if instance:IsA("Animation") then
-			roots[#roots + 1] = instance
-			animations[#animations + 1] = instance
-		elseif instance:IsA("KeyframeSequence") then
-			roots[#roots + 1] = instance
-			local keyframeCount = 0
-			for _, child in instance:GetChildren() do
-				if child:IsA("Keyframe") then
-					keyframeCount += 1
-				end
-			end
-			report.existingSequences[#report.existingSequences + 1] = {
-				name = instance.Name,
-				path = instance:GetFullName(),
-				keyframes = keyframeCount,
-			}
-		elseif instance:IsA("CurveAnimation") then
-			report.curveAnimations[#report.curveAnimations + 1] = {
-				name = instance.Name,
-				path = instance:GetFullName(),
-				status = "unsupported_curve_data",
-			}
-		end
-		if index % 1000 == 0 then
-			updateProgress("Scanning objects: " .. math.floor(index / #descendants * 100) .. "%", nil, false)
-			task.wait()
-		end
-	end
-	descendants = nil
-	updateProgress("Found " .. #animations .. " Animation objects and "
-		.. #report.existingSequences .. " existing KeyframeSequences")
-	local uniqueIds = {}
-	local uniqueIdCount = 0
-	for _, animation in animations do
-		local id = animation.AnimationId
-		if id ~= "" and not uniqueIds[id] then
-			uniqueIds[id] = true
-			uniqueIdCount += 1
-		end
-	end
-	local processedIds = 0
-	local fetchedSequences = 0
-
-	local provider
-	local providerOk, providerResult = pcall(game.GetService, game, "AnimationClipProvider")
-	if providerOk then
-		provider = providerResult
-	end
-
-	for _, animation in animations do
-		local id = animation.AnimationId
+	local providerOk, provider = pcall(game.GetService, game, "AnimationClipProvider")
+	for index, record in records do
+		showStatus("Fetching keyframes " .. index .. "/" .. #records .. ": " .. record.name)
 		local item = {
-			name = animation.Name,
-			animationId = id,
-			path = animation:GetFullName(),
+			name = record.name,
+			animationId = record.animationId,
+			names = record.names,
 			status = "id_only",
 		}
 		report.animations[#report.animations + 1] = item
-		if id == "" then
-			item.status = "missing_id"
-		elseif seenId[id] then
-			item.status = seenId[id].status
-			item.detail = "Same ID as an earlier Animation; clip fetched once."
-		elseif not provider then
-			item.status = "provider_unavailable"
-			item.detail = tostring(providerResult)
-			seenId[id] = item
-		else
-			-- Official API. A failed call is recorded; no alternate asset or
-			-- permission-bypass method is attempted.
-			updateProgress("Requesting animation ID " .. (processedIds + 1) .. "/" .. uniqueIdCount,
-				nil, false)
+		local reference = Instance.new("Animation")
+		reference.Name = record.name
+		reference.AnimationId = record.animationId
+		roots[#roots + 1] = reference
+		if providerOk then
 			local ok, clip = pcall(function()
-				return provider:GetAnimationClipAsync(id)
+				return provider:GetAnimationClipAsync(record.animationId)
 			end)
-			if not ok then
-				item.status = "inaccessible_or_unsupported"
-				item.detail = tostring(clip)
-			elseif clip and clip:IsA("KeyframeSequence") then
-				local assetNumber = string.match(id, "rbxassetid://(%d+)")
-					or string.match(id, "[?&]id=(%d+)")
-					or string.match(id, "^(%d+)$")
+			if ok and clip and clip:IsA("KeyframeSequence") then
 				local material = clip
 				if clip.Parent then
-					local cloned, result = pcall(function()
+					local cloned, copy = pcall(function()
 						return clip:Clone()
 					end)
-					material = cloned and result or nil
+					material = cloned and copy or nil
 				end
 				if material then
-					material.Name = animation.Name .. (assetNumber and (" [" .. assetNumber .. "]") or "")
+					material.Name = record.name
 					roots[#roots + 1] = material
 					item.status = "fetched_keyframe_sequence"
-					fetchedSequences += 1
-					item.exportedSequenceName = material.Name
-					local keyframeCount = 0
+					item.keyframes = 0
 					for _, child in material:GetChildren() do
 						if child:IsA("Keyframe") then
-							keyframeCount += 1
+							item.keyframes += 1
 						end
 					end
-					item.keyframes = keyframeCount
 				else
 					item.status = "clone_failed"
 				end
-			elseif clip and clip:IsA("CurveAnimation") then
-				item.status = "unsupported_curve_data"
-				item.detail = "Retrieved a CurveAnimation, which has no KeyframeSequence to export."
+			elseif ok and clip and clip:IsA("CurveAnimation") then
+				item.status = "unsupported_curve_animation"
 			else
-				item.status = "unsupported_clip_type"
-				item.detail = clip and clip.ClassName or "No clip returned"
+				item.status = "inaccessible_or_unsupported"
+				item.detail = tostring(ok and (clip and clip.ClassName or "No clip returned") or clip)
 			end
-			seenId[id] = item
-		end
-		if id ~= "" and uniqueIds[id] then
-			uniqueIds[id] = nil
-			processedIds += 1
-			local percent = math.floor(processedIds / uniqueIdCount * 100)
-			updateProgress("Checking animation IDs " .. processedIds .. "/" .. uniqueIdCount
-				.. " (" .. percent .. "%), keyframe clips fetched: " .. fetchedSequences,
-				nil, uniqueIdCount <= 20 or processedIds % math.max(1, math.floor(uniqueIdCount / 10)) == 0)
-		end
-	end
-	report.fetchedKeyframeSequences = fetchedSequences
-
-	if #roots == 0 then
-		report.status = "nothing_accessible"
-	else
-		if not writefile and not config.Callback then
-			report.status = "no_file_writer"
-			report.error = "writefile is unavailable; provide a Callback to receive .rbxl bytes."
 		else
-			updateProgress("Building " .. filePath .. "; file size and writing progress appear at the top right")
-			task.wait()
-			local callOk, saved, saveErr = pcall(synsaveinstance, {
-				mode = "animation-only",
-				AnimationOnly = true,
-				ExtraInstances = roots,
-				IsModel = false,
-				FilePath = filePath,
-				Binary = true,
-				CompressionMode = "zstd",
-				CompressionLevel = 3,
-				ReadMe = false,
-				ShowStatus = true,
-				Decompile = false,
-				SaveBytecode = false,
-				IgnoreDefaultPlayerScripts = false,
-				IgnoreSpecialProperties = true,
-				RiskyServicesDisabled = { UGC = true, Encoding = false, Reflection = false },
-				NilInstances = false,
-				AntiIdle = false,
-				SafeMode = false,
-				KillAllScripts = false,
-				BoostFPS = false,
-				ShutdownWhenDone = false,
-				Callback = config.Callback or false,
-			})
-			report.status = callOk and saved and "saved" or "save_failed"
-			if report.status == "save_failed" then
-				report.error = tostring(callOk and saveErr or saved)
-			end
+			item.status = "provider_unavailable"
+			item.detail = tostring(provider)
 		end
+		task.wait()
 	end
-
-	if writefile then
-		local ok, err = pcall(writefile, reportPath, game:GetService("HttpService"):JSONEncode(report))
-		if not ok then
-			warn("Animation report could not be written: " .. tostring(err))
+	if not writefile then
+		report.status = "no_file_writer"
+	else
+		showStatus("Building " .. filePath .. "; writing progress appears at the top right")
+		local callOk, saved, saveErr = pcall(synsaveinstance, {
+			mode = "animation-only",
+			AnimationOnly = true,
+			ExtraInstances = roots,
+			IsModel = false,
+			FilePath = filePath,
+			Binary = true,
+			CompressionMode = "zstd",
+			CompressionLevel = 3,
+			ReadMe = false,
+			ShowStatus = true,
+			Decompile = false,
+			SaveBytecode = false,
+			IgnoreDefaultPlayerScripts = false,
+			IgnoreSpecialProperties = true,
+			RiskyServicesDisabled = { UGC = true, Encoding = false, Reflection = false },
+			NilInstances = false,
+			AntiIdle = false,
+			SafeMode = false,
+			KillAllScripts = false,
+			BoostFPS = false,
+			ShutdownWhenDone = false,
+		})
+		report.status = callOk and saved and "saved" or "save_failed"
+		if report.status == "save_failed" then
+			report.error = tostring(callOk and saveErr or saved)
+		end
+		local jsonOk, jsonErr = pcall(function()
+			writefile(reportPath, game:GetService("HttpService"):JSONEncode(report))
+		end)
+		if not jsonOk then
+			warn("[Animation capture] Report write failed: " .. tostring(jsonErr))
 		end
 	end
 	if report.status == "saved" then
-		finishProgress("SUCCESS: " .. filePath .. "; " .. #report.animations
-			.. " Animation objects, " .. fetchedSequences .. " fetched keyframe clips", true)
+		showStatus("SUCCESS: " .. filePath .. "; captured " .. #records .. " animation IDs")
 	else
-		finishProgress("FAILED: " .. report.status .. "; check " .. reportPath .. " and the console", false)
-		if report.error then
-			warn("[Animation export] " .. report.error)
-		end
+		showStatus("FAILED: " .. report.status .. "; check console and " .. reportPath)
 	end
 	return report
 end
 
-return exportAnimations({})
+toggle.Activated:Connect(function()
+	if exporting or autoRunning then
+		if autoRunning then
+			showStatus("Capture stays on during the auto test. Press Stop to end it.")
+		end
+		return
+	end
+	capturing = not capturing
+	toggle.Text = capturing and "Pause capture" or "Resume capture"
+	showStatus((capturing and "Watching" or "Paused") .. "; captured " .. count .. " animation IDs")
+end)
+local function startAutoTest()
+	if autoRunning or exporting then
+		return
+	end
+	autoScheduled = false
+	autoRunning = true
+	autoStop = false
+	capturing = true
+	toggle.Text = "Pause capture"
+	autoButton.Text = "Running..."
+	task.spawn(function()
+		local ok, err = pcall(runAutoTest)
+		if not ok then
+			showStatus("Auto test failed: " .. tostring(err))
+			setAutoProgress("failed")
+			warn("[Animation capture] Auto test: " .. tostring(err))
+		end
+		autoCurrentName = nil
+		autoSeen = nil
+		autoBaselineTracks = nil
+		autoRunning = false
+		autoButton.Text = "Auto test GUI"
+	end)
+end
+autoButton.Activated:Connect(startAutoTest)
+stopButton.Activated:Connect(function()
+	if autoRunning or autoScheduled then
+		autoStop = true
+		autoScheduled = false
+		setAutoProgress(autoRunning and "stopping..." or "cancelled before start")
+	else
+		showStatus("Auto test is not running.")
+	end
+end)
+saveButton.Activated:Connect(function()
+	if exporting or autoRunning then
+		if autoRunning then
+			showStatus("Stop or finish the auto test before saving.")
+		end
+		return
+	end
+	if count == 0 then
+		showStatus("No IDs yet. Press the dance buttons while capture is on.")
+		return
+	end
+	autoScheduled = false
+	exporting = true
+	capturing = false
+	toggle.Text = "Paused"
+	saveButton.Text = "Saving..."
+	task.spawn(function()
+		local ok, err = pcall(exportCaptured)
+		if not ok then
+			showStatus("FAILED: " .. tostring(err))
+			warn("[Animation capture] " .. tostring(err))
+		end
+		exporting = false
+		saveButton.Text = "Save .rbxl"
+	end)
+end)
+closeButton.Activated:Connect(function()
+	if exporting then
+		showStatus("Saving is still running. Wait for the result.")
+		return
+	end
+	autoStop = true
+	gui:Destroy()
+end)
+gui.Destroying:Connect(function()
+	capturing = false
+	autoStop = true
+	for _, connection in connections do
+		connection:Disconnect()
+	end
+end)
+
+showStatus("Capture is on. Auto testing the GUI in 3 seconds; Stop cancels it.")
+task.spawn(function()
+	for secondsLeft = 3, 1, -1 do
+		if not autoScheduled or not gui.Parent then
+			return
+		end
+		setAutoProgress("starting in " .. secondsLeft .. " seconds; Stop cancels")
+		task.wait(1)
+	end
+	if autoScheduled and gui.Parent then
+		startAutoTest()
+	end
+end)
+return gui
+
