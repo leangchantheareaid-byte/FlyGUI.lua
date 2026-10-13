@@ -550,8 +550,21 @@ exportBtn.MouseButton1Click:Connect(function()
     setProgress("Saving " .. #roots .. " sequences to " .. filePath .. "...", TEXT_ACCENT)
     task.wait()
 
+    -- Resolve the save function across different executors
+    local saveFunc = syn and syn.save_instance
+        or (typeof(synsaveinstance) == "function" and synsaveinstance)
+        or saveinstance
+        or nil
+
+    if not saveFunc then
+        setProgress("Save error: no save function found (synsaveinstance/saveinstance)", BTN_RED)
+        exportBtn.Active = true
+        exportBtn.BackgroundColor3 = BTN_GREEN
+        return
+    end
+
     local saveOk, saveErr = pcall(function()
-        synsaveinstance({
+        saveFunc({
             ExtraInstances = roots,
             IsModel = false,
             FilePath = filePath,
