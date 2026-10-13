@@ -1,11 +1,9 @@
--- Animation-focused edition. Returns exportAnimations(config), not the original
--- saveinstance(options) entry point. See animation-exporter-README.md.
+-- All-visible-animation edition. Runs immediately and writes a Studio-openable
+-- .rbxl place plus a .json report. See animation-exporter-all-README.md.
 --!native
 --!optimize 2
 --!divine-intellect
 -- https://discord.gg/wx4ThpAsmw
-
-print("[Animation export] Loading serializer helpers...")
 
 local function string_find(s, pattern, init)
 	return string.find(s, pattern, init, true)
@@ -4309,7 +4307,7 @@ local function synsaveinstance(...)
 			or service.Players.LocalPlayer
 	end
 
-	local function format_size(byteCount)
+	local function get_size_format()
 		local Size
 
 		for i, unit in
@@ -4321,17 +4319,13 @@ local function synsaveinstance(...)
 				"TB",
 			}
 		do
-			if byteCount < 0x400 ^ i then
-				Size = math.floor(byteCount / (0x400 ^ (i - 1)) * 10) / 10 .. " " .. unit
+			if totalsize < 0x400 ^ i then
+				Size = math.floor(totalsize / (0x400 ^ (i - 1)) * 10) / 10 .. " " .. unit
 				break
 			end
 		end
 
-		return Size or tostring(byteCount) .. " B"
-	end
-
-	local function get_size_format()
-		return format_size(totalsize)
+		return Size
 	end
 
 	local lastYield = os.clock()
@@ -4379,7 +4373,6 @@ local function synsaveinstance(...)
 			end
 			LoadingText = text
 			IsLoading = true
-			StatusText.Text = text
 			ensureSpinner()
 			if waitForRender then
 				wait_for_render()
@@ -4975,6 +4968,8 @@ local function synsaveinstance(...)
 			if OPTIONS.AnimationOnly then
 				local allowed = false
 				if parent == nil then
+					allowed = instance:IsA("ReplicatedStorage")
+				elseif parent:IsA("ReplicatedStorage") then
 					allowed = instance:IsA("Animation") or instance:IsA("KeyframeSequence")
 				elseif parent:IsA("KeyframeSequence") then
 					allowed = instance:IsA("Keyframe")
@@ -5897,6 +5892,14 @@ local function synsaveinstance(...)
 			end)
 		end
 
+		-- A place file needs a service at its root. Virtually place the selected
+		-- animation objects under ReplicatedStorage in the saved file only.
+		if OPTIONS.AnimationOnly and not IsModel then
+			local animationRoot = service.ReplicatedStorage
+			InstancesOverrides[animationRoot] = { __Children = ToSaveList }
+			ToSaveList = { animationRoot }
+		end
+
 		-- One collect over the main roots plus every extra's roots.
 		local allRoots = table.clone(ToSaveList)
 		for _, extra in pendingExtras do
@@ -5984,26 +5987,20 @@ local function synsaveinstance(...)
 			-- overflow on large places.
 			local SEGMENT_SIZE = 4145728
 			local batch, batchSize, written = {}, 0, 0
-			local function appendWithStatus(data)
-				local nextWritten = written + #data
-				local percent = totalsize > 0 and math.round(nextWritten / totalsize * 100) or 100
-				run_with_loading(
-					"Writing " .. format_size(nextWritten) .. " / " .. get_size_format()
-						.. " (" .. percent .. "%)",
-					nil,
-					false,
-					appendfile,
-					placename,
-					data
-				)
-				written = nextWritten
-			end
 
 			local function flush()
 				if batchSize == 0 then
 					return
 				end
-				appendWithStatus(table.concat(batch))
+				written += batchSize
+				run_with_loading(
+					"Writing to File " .. math.round(written / totalsize * 100) .. "%",
+					nil,
+					false,
+					appendfile,
+					placename,
+					table.concat(batch)
+				)
 				table.clear(batch)
 				batchSize = 0
 				task.wait()
@@ -6016,10 +6013,11 @@ local function synsaveinstance(...)
 					flush()
 					local offset = 1
 					while offset <= #chunk do
-						appendWithStatus(string.sub(chunk, offset, offset + SEGMENT_SIZE - 1))
+						appendfile(placename, string.sub(chunk, offset, offset + SEGMENT_SIZE - 1))
 						offset += SEGMENT_SIZE
 						task.wait()
 					end
+					written += #chunk
 				else
 					batch[#batch + 1] = chunk
 					batchSize += #chunk
@@ -6743,8 +6741,7 @@ local function synsaveinstance(...)
 	return ok, err, placename
 end
 
--- Export only replicated Animation objects and KeyframeSequences visible in
--- this client. The regular serializer is kept above for .rbxm generation.
+-- Export every Animation and existing KeyframeSequence visible in this client.
 local function makeAnimationStatus()
 	local gui
 	local label
@@ -6820,76 +6817,63 @@ local function makeAnimationStatus()
 	return update, finish
 end
 
-local function exportAnimationsImpl(config, updateProgress, finishProgress)
+local function exportAnimations(config)
 	config = config or {}
-	local filePath = config.FilePath or "animations.rbxl"
-	if string.sub(string.lower(filePath), -5) ~= ".rbxl" then
+	local updateProgress, finishProgress = makeAnimationStatus()
+	local placeName
+	if not config.FilePath then
+		updateProgress("Reading game name for output file...")
+		local ok, info = pcall(function()
+			return game:GetService("MarketplaceService"):GetProductInfoAsync(game.PlaceId)
+		end)
+		if ok and info and type(info.Name) == "string" then
+			placeName = info.Name
+		end
+		if not placeName or placeName == "" then
+			placeName = game.Name
+		end
+	end
+	local safeName = placeName and string.sub(
+		string.gsub(string.gsub(placeName, "[^%w _%-]", ""), "%s+", "-"), 1, 80)
+	if safeName then
+		safeName = string.gsub(string.gsub(safeName, "^%-+", ""), "%-+$", "")
+	end
+	if not safeName or safeName == "" or safeName == "Game" then
+		safeName = "place-" .. tostring(game.PlaceId)
+	end
+	local filePath = config.FilePath or (safeName .. "-all-animations.rbxl")
+	local lowerPath = string.lower(filePath)
+	if string.sub(lowerPath, -5) == ".rbxm" then
+		filePath = string.sub(filePath, 1, -6) .. ".rbxl"
+	elseif string.sub(lowerPath, -5) ~= ".rbxl" then
 		filePath ..= ".rbxl"
 	end
 	local reportPath = string.sub(filePath, 1, -6) .. ".json"
 	local report = {
-		modelFile = filePath,
+		outputFile = filePath,
+		outputFormat = "place",
 		reportFile = reportPath,
 		placeId = game.PlaceId,
+		placeName = placeName,
 		animations = {},
 		existingSequences = {},
 		curveAnimations = {},
 		status = "not_started",
 	}
-
-	-- Folder 1: original Animation objects (mirrored structure)
-	local folderOriginal = Instance.new("Folder")
-	folderOriginal.Name = "AnimationObjects"
-	-- Folder 2: fetched KeyframeSequences (same mirrored structure)
-	local folderKFS = Instance.new("Folder")
-	folderKFS.Name = "KeyframeSequences"
-
-	local function getOrCreate(parent, name)
-		local existing = parent:FindFirstChild(name)
-		if existing then return existing end
-		local f = Instance.new("Folder")
-		f.Name = name
-		f.Parent = parent
-		return f
-	end
-
-	-- Mirror an instance's ancestor chain (up to game) into a target root folder
-	local function getMirrorParent(instance, targetRoot)
-		local chain = {}
-		local cur = instance.Parent
-		while cur and cur ~= game do
-			table.insert(chain, 1, cur.Name)
-			cur = cur.Parent
-		end
-		local parent = targetRoot
-		for _, name in ipairs(chain) do
-			parent = getOrCreate(parent, name)
-		end
-		return parent
-	end
-
-	local roots = { folderOriginal, folderKFS }
+	local roots = {}
 	local seenId = {}
 	local animations = {}
 
 	-- GetDescendants sees only instances replicated to this client. It does not
 	-- inspect nil instances or request server-only services.
-	updateProgress("Scanning visible objects... 0%")
-	task.wait()
+	updateProgress("Scanning all client-visible objects...")
 	local descendants = game:GetDescendants()
-	local lastScanLog = -10
 	for index, instance in descendants do
 		if instance:IsA("Animation") then
-			-- Clone into mirrored AnimationObjects folder
-			local mirrorParent = getMirrorParent(instance, folderOriginal)
-			local clone = instance:Clone()
-			clone.Parent = mirrorParent
+			roots[#roots + 1] = instance
 			animations[#animations + 1] = instance
 		elseif instance:IsA("KeyframeSequence") then
-			-- Clone existing KFS into mirrored KeyframeSequences folder
-			local mirrorParent = getMirrorParent(instance, folderKFS)
-			local clone = instance:Clone()
-			clone.Parent = mirrorParent
+			roots[#roots + 1] = instance
 			local keyframeCount = 0
 			for _, child in instance:GetChildren() do
 				if child:IsA("Keyframe") then
@@ -6909,19 +6893,13 @@ local function exportAnimationsImpl(config, updateProgress, finishProgress)
 			}
 		end
 		if index % 1000 == 0 then
-			local percent = math.floor(index / #descendants * 100)
-			local shouldLog = percent >= lastScanLog + 10
-			if shouldLog then
-				lastScanLog = percent
-			end
-			updateProgress("Scanning visible objects... " .. percent .. "%", nil, shouldLog)
+			updateProgress("Scanning objects: " .. math.floor(index / #descendants * 100) .. "%", nil, false)
 			task.wait()
 		end
 	end
 	descendants = nil
 	updateProgress("Found " .. #animations .. " Animation objects and "
 		.. #report.existingSequences .. " existing KeyframeSequences")
-
 	local uniqueIds = {}
 	local uniqueIdCount = 0
 	for _, animation in animations do
@@ -6933,7 +6911,6 @@ local function exportAnimationsImpl(config, updateProgress, finishProgress)
 	end
 	local processedIds = 0
 	local fetchedSequences = 0
-	local lastIdLog = -10
 
 	local provider
 	local providerOk, providerResult = pcall(game.GetService, game, "AnimationClipProvider")
@@ -6943,7 +6920,6 @@ local function exportAnimationsImpl(config, updateProgress, finishProgress)
 
 	for _, animation in animations do
 		local id = animation.AnimationId
-		local firstId = id ~= "" and seenId[id] == nil
 		local item = {
 			name = animation.Name,
 			animationId = id,
@@ -6975,20 +6951,29 @@ local function exportAnimationsImpl(config, updateProgress, finishProgress)
 				local assetNumber = string.match(id, "rbxassetid://(%d+)")
 					or string.match(id, "[?&]id=(%d+)")
 					or string.match(id, "^(%d+)$")
-				clip.Name = animation.Name .. (assetNumber and (" [" .. assetNumber .. "]") or "")
-				-- Place into mirrored KeyframeSequences folder
-				local mirrorParent = getMirrorParent(animation, folderKFS)
-				clip.Parent = mirrorParent
-				item.status = "fetched_keyframe_sequence"
-				fetchedSequences += 1
-				item.exportedSequenceName = clip.Name
-				local keyframeCount = 0
-				for _, child in clip:GetChildren() do
-					if child:IsA("Keyframe") then
-						keyframeCount += 1
-					end
+				local material = clip
+				if clip.Parent then
+					local cloned, result = pcall(function()
+						return clip:Clone()
+					end)
+					material = cloned and result or nil
 				end
-				item.keyframes = keyframeCount
+				if material then
+					material.Name = animation.Name .. (assetNumber and (" [" .. assetNumber .. "]") or "")
+					roots[#roots + 1] = material
+					item.status = "fetched_keyframe_sequence"
+					fetchedSequences += 1
+					item.exportedSequenceName = material.Name
+					local keyframeCount = 0
+					for _, child in material:GetChildren() do
+						if child:IsA("Keyframe") then
+							keyframeCount += 1
+						end
+					end
+					item.keyframes = keyframeCount
+				else
+					item.status = "clone_failed"
+				end
 			elseif clip and clip:IsA("CurveAnimation") then
 				item.status = "unsupported_curve_data"
 				item.detail = "Retrieved a CurveAnimation, which has no KeyframeSequence to export."
@@ -6998,17 +6983,13 @@ local function exportAnimationsImpl(config, updateProgress, finishProgress)
 			end
 			seenId[id] = item
 		end
-		if firstId then
+		if id ~= "" and uniqueIds[id] then
+			uniqueIds[id] = nil
 			processedIds += 1
 			local percent = math.floor(processedIds / uniqueIdCount * 100)
-			local shouldLog = uniqueIdCount <= 20 or percent >= lastIdLog + 10
-				or processedIds == uniqueIdCount
-			if shouldLog then
-				lastIdLog = percent
-			end
 			updateProgress("Checking animation IDs " .. processedIds .. "/" .. uniqueIdCount
 				.. " (" .. percent .. "%), keyframe clips fetched: " .. fetchedSequences,
-				nil, shouldLog)
+				nil, uniqueIdCount <= 20 or processedIds % math.max(1, math.floor(uniqueIdCount / 10)) == 0)
 		end
 	end
 	report.fetchedKeyframeSequences = fetchedSequences
@@ -7018,7 +6999,7 @@ local function exportAnimationsImpl(config, updateProgress, finishProgress)
 	else
 		if not writefile and not config.Callback then
 			report.status = "no_file_writer"
-			report.error = "writefile is unavailable; provide a Callback to receive .rbxm bytes."
+			report.error = "writefile is unavailable; provide a Callback to receive .rbxl bytes."
 		else
 			updateProgress("Building " .. filePath .. "; file size and writing progress appear at the top right")
 			task.wait()
@@ -7029,7 +7010,8 @@ local function exportAnimationsImpl(config, updateProgress, finishProgress)
 				IsModel = false,
 				FilePath = filePath,
 				Binary = true,
-				CompressionMode = false,
+				CompressionMode = "zstd",
+				CompressionLevel = 3,
 				ReadMe = false,
 				ShowStatus = true,
 				Decompile = false,
@@ -7053,17 +7035,14 @@ local function exportAnimationsImpl(config, updateProgress, finishProgress)
 	end
 
 	if writefile then
-		local ok, err = pcall(function()
-			writefile(reportPath, game:GetService("HttpService"):JSONEncode(report))
-		end)
+		local ok, err = pcall(writefile, reportPath, game:GetService("HttpService"):JSONEncode(report))
 		if not ok then
 			warn("Animation report could not be written: " .. tostring(err))
 		end
 	end
 	if report.status == "saved" then
-		finishProgress("SUCCESS: saved " .. filePath .. "; " .. #report.animations
-			.. " Animation objects, " .. #report.existingSequences
-			.. " existing sequences, " .. fetchedSequences .. " fetched keyframe clips", true)
+		finishProgress("SUCCESS: " .. filePath .. "; " .. #report.animations
+			.. " Animation objects, " .. fetchedSequences .. " fetched keyframe clips", true)
 	else
 		finishProgress("FAILED: " .. report.status .. "; check " .. reportPath .. " and the console", false)
 		if report.error then
@@ -7073,15 +7052,4 @@ local function exportAnimationsImpl(config, updateProgress, finishProgress)
 	return report
 end
 
-local function exportAnimations(config)
-	local updateProgress, finishProgress = makeAnimationStatus()
-	local ok, result = pcall(exportAnimationsImpl, config, updateProgress, finishProgress)
-	if ok then
-		return result
-	end
-	finishProgress("FAILED: unexpected error; check the console", false)
-	warn("[Animation export] " .. tostring(result))
-	return { status = "failed", error = tostring(result) }
-end
-
-exportAnimations({ FilePath = "animations.rbxl" })
+return exportAnimations({})
