@@ -516,38 +516,102 @@ exportBtn.MouseButton1Click:Connect(function()
     setProgress("Starting export...", TEXT_ACCENT)
     task.wait()
 
-    local roots = {}
+    -- Root folder 1: original Animation objects (cloned, preserving structure)
+    local folderOriginal = Instance.new("Folder")
+    folderOriginal.Name = "AnimationObjects"
+
+    -- Root folder 2: fetched KeyframeSequences (mirrored structure)
+    local folderKFS = Instance.new("Folder")
+    folderKFS.Name = "KeyframeSequences"
+
+    -- Helper: get or create a sub-folder by name inside a parent
+    local function getOrCreate(parent, name)
+        local existing = parent:FindFirstChild(name)
+        if existing then return existing end
+        local f = Instance.new("Folder")
+        f.Name = name
+        f.Parent = parent
+        return f
+    end
+
+    -- Build per-entry sub-folders and clone Animation objects into folderOriginal
+    -- We need to track: for each entry (parent folder), what sub-folder name to use
+    -- entry.instance is the folder containing the animations (e.g. "alucard")
+    -- entry.instance.Parent is the parent of that (e.g. "characters")
+    -- We'll mirror: folderOriginal > parentName > folderName
+    --               folderKFS      > parentName > folderName
+
+    local seenId = {}   -- AnimationId -> KeyframeSequence (deduplicate fetches)
     local fetched = 0
     local failed = 0
+    local total = #animQueue
 
-    for i, item in ipairs(animQueue) do
-        setProgress("Fetching " .. i .. "/" .. #animQueue .. "...", TEXT_ACCENT)
-        task.wait()  -- let UI update
-
-        local ok2, result = pcall(function()
-            return AnimationClipProvider:GetAnimationClipAsync(item.anim.AnimationId)
-        end)
-
-        if ok2 and result then
-            -- Extract asset ID from rbxassetid://XXXXXX
-            local assetId = tostring(item.anim.AnimationId):match("%d+") or "unknown"
-            result.Name = item.name .. " [" .. assetId .. "]"
-            table.insert(roots, result)
-            fetched = fetched + 1
-        else
-            failed = failed + 1
-            warn("[AnimExporter] Failed to fetch: " .. tostring(item.anim.AnimationId) .. " - " .. tostring(result))
+    -- Group animQueue back by entry for structure mirroring
+    -- animQueue items have { anim, name } — we need parent folder info
+    -- Rebuild with structure info from selected entries
+    local structuredQueue = {}
+    local seenForQueue = {}
+    for _, entry in ipairs(selected) do
+        local parentName = (entry.instance.Parent and entry.instance.Parent.Name) or "Root"
+        local folderName = entry.instance.Name
+        for _, anim in ipairs(entry.anims) do
+            local id = anim.AnimationId
+            if id and id ~= "" and not seenForQueue[id] then
+                seenForQueue[id] = true
+                table.insert(structuredQueue, {
+                    anim = anim,
+                    name = anim.Name,
+                    parentName = parentName,
+                    folderName = folderName,
+                })
+            end
         end
     end
 
-    if #roots == 0 then
+    for i, item in ipairs(structuredQueue) do
+        setProgress("Fetching " .. i .. "/" .. #structuredQueue .. "...", TEXT_ACCENT)
+        task.wait()
+
+        -- Clone Animation into folderOriginal with mirrored structure
+        local origParent = getOrCreate(folderOriginal, item.parentName)
+        local origSub = getOrCreate(origParent, item.folderName)
+        local animClone = item.anim:Clone()
+        animClone.Parent = origSub
+
+        -- Fetch KeyframeSequence
+        if not seenId[item.anim.AnimationId] then
+            local ok2, result = pcall(function()
+                return AnimationClipProvider:GetAnimationClipAsync(item.anim.AnimationId)
+            end)
+            if ok2 and result then
+                seenId[item.anim.AnimationId] = result
+                fetched = fetched + 1
+            else
+                seenId[item.anim.AnimationId] = false
+                failed = failed + 1
+                warn("[AnimExporter] Failed: " .. tostring(item.anim.AnimationId) .. " - " .. tostring(result))
+            end
+        end
+
+        -- Place KFS into mirrored folder
+        local kfs = seenId[item.anim.AnimationId]
+        if kfs then
+            local kfsParent = getOrCreate(folderKFS, item.parentName)
+            local kfsSub = getOrCreate(kfsParent, item.folderName)
+            local kfsClone = kfs:Clone()
+            kfsClone.Name = item.name
+            kfsClone.Parent = kfsSub
+        end
+    end
+
+    if fetched == 0 then
         setProgress("Failed to fetch any animations.", BTN_RED)
         exportBtn.Active = true
         exportBtn.BackgroundColor3 = BTN_GREEN
         return
     end
 
-    setProgress("Saving " .. #roots .. " sequences to " .. filePath .. "...", TEXT_ACCENT)
+    setProgress("Saving to " .. filePath .. "...", TEXT_ACCENT)
     task.wait()
 
     -- Resolve the save function across different executors
@@ -565,7 +629,7 @@ exportBtn.MouseButton1Click:Connect(function()
 
     local saveOk, saveErr = pcall(function()
         saveFunc({
-            ExtraInstances = roots,
+            ExtraInstances = { folderOriginal, folderKFS },
             IsModel = false,
             FilePath = filePath,
             Binary = true,
@@ -586,7 +650,7 @@ exportBtn.MouseButton1Click:Connect(function()
     end)
 
     if saveOk then
-        local msg = "Done! Saved " .. fetched .. " sequence" .. (fetched == 1 and "" or "s")
+        local msg = "Done! Saved " .. fetched .. " KFS + originals"
         if failed > 0 then
             msg = msg .. " (" .. failed .. " failed)"
         end
