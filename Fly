@@ -1,5 +1,5 @@
 -- Auto test AnimationUi dances, capture observed IDs, then save a .rbxl
--- place and .json report. See animation-exporter-gui-auto-README.md.
+-- with both KeyframeSequence and CurveAnimation clips.
 --!native
 --!optimize 2
 --!divine-intellect
@@ -4971,12 +4971,24 @@ local function synsaveinstance(...)
 					allowed = instance:IsA("ReplicatedStorage")
 				elseif parent:IsA("ReplicatedStorage") then
 					allowed = instance:IsA("Animation") or instance:IsA("KeyframeSequence")
+						or instance:IsA("CurveAnimation")
 				elseif parent:IsA("KeyframeSequence") then
 					allowed = instance:IsA("Keyframe")
 				elseif parent:IsA("Keyframe") then
 					allowed = instance:IsA("Pose") or instance:IsA("NumberPose") or instance:IsA("KeyframeMarker")
 				elseif parent:IsA("Pose") then
 					allowed = instance:IsA("Pose") or instance:IsA("NumberPose")
+				else
+					local cursor = parent
+					while cursor and not cursor:IsA("CurveAnimation") do
+						cursor = cursor.Parent
+					end
+					if cursor then
+						allowed = instance:IsA("Folder") or instance:IsA("Vector3Curve")
+							or instance:IsA("EulerRotationCurve") or instance:IsA("RotationCurve")
+							or instance:IsA("FloatCurve") or instance:IsA("ValueCurve")
+							or instance:IsA("MarkerCurve") or instance:IsA("CompositeValueCurve")
+					end
 				end
 				if not allowed then
 					return
@@ -7151,7 +7163,7 @@ local function outputName()
 	if safeName == "" or safeName == "Game" then
 		safeName = "place-" .. tostring(game.PlaceId)
 	end
-	return safeName .. "-observed-dances.rbxl", placeName
+	return safeName .. "-observed-dances-all-clips.rbxl", placeName
 end
 
 local function exportCaptured()
@@ -7177,8 +7189,10 @@ local function exportCaptured()
 	end)
 	local roots = {}
 	local providerOk, provider = pcall(game.GetService, game, "AnimationClipProvider")
+	local keyframeClips = 0
+	local curveClips = 0
 	for index, record in records do
-		showStatus("Fetching keyframes " .. index .. "/" .. #records .. ": " .. record.name)
+		showStatus("Fetching animation clips " .. index .. "/" .. #records .. ": " .. record.name)
 		local item = {
 			name = record.name,
 			animationId = record.animationId,
@@ -7191,10 +7205,19 @@ local function exportCaptured()
 		reference.AnimationId = record.animationId
 		roots[#roots + 1] = reference
 		if providerOk then
-			local ok, clip = pcall(function()
-				return provider:GetAnimationClipAsync(record.animationId)
-			end)
-			if ok and clip and clip:IsA("KeyframeSequence") then
+			local ok, clip
+			for attempt = 1, 3 do
+				ok, clip = pcall(function()
+					return provider:GetAnimationClipAsync(record.animationId)
+				end)
+				if ok and clip and clip:IsA("AnimationClip") then
+					break
+				end
+				if attempt < 3 then
+					task.wait(attempt)
+				end
+			end
+			if ok and clip and (clip:IsA("KeyframeSequence") or clip:IsA("CurveAnimation")) then
 				local material = clip
 				if clip.Parent then
 					local cloned, copy = pcall(function()
@@ -7205,18 +7228,23 @@ local function exportCaptured()
 				if material then
 					material.Name = record.name
 					roots[#roots + 1] = material
-					item.status = "fetched_keyframe_sequence"
-					item.keyframes = 0
-					for _, child in material:GetChildren() do
-						if child:IsA("Keyframe") then
-							item.keyframes += 1
+					if material:IsA("KeyframeSequence") then
+						keyframeClips += 1
+						item.status = "fetched_keyframe_sequence"
+						item.keyframes = 0
+						for _, child in material:GetChildren() do
+							if child:IsA("Keyframe") then
+								item.keyframes += 1
+							end
 						end
+					else
+						curveClips += 1
+						item.status = "fetched_curve_animation"
+						item.curveNodes = #material:GetDescendants()
 					end
 				else
 					item.status = "clone_failed"
 				end
-			elseif ok and clip and clip:IsA("CurveAnimation") then
-				item.status = "unsupported_curve_animation"
 			else
 				item.status = "inaccessible_or_unsupported"
 				item.detail = tostring(ok and (clip and clip.ClassName or "No clip returned") or clip)
@@ -7227,6 +7255,8 @@ local function exportCaptured()
 		end
 		task.wait()
 	end
+	report.keyframeSequences = keyframeClips
+	report.curveAnimations = curveClips
 	if not writefile then
 		report.status = "no_file_writer"
 	else
@@ -7266,7 +7296,8 @@ local function exportCaptured()
 		end
 	end
 	if report.status == "saved" then
-		showStatus("SUCCESS: " .. filePath .. "; captured " .. #records .. " animation IDs")
+		showStatus("SUCCESS: " .. filePath .. "; " .. keyframeClips
+			.. " KeyframeSequences, " .. curveClips .. " CurveAnimations; " .. #records .. " IDs")
 	else
 		showStatus("FAILED: " .. report.status .. "; check console and " .. reportPath)
 	end
